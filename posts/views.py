@@ -17,28 +17,18 @@ class StandardResultsSetPagination(PageNumberPagination):
     max_page_size = 100
 
 
+from maincore.imagekit_utils import ImageKitService
+
 class ImageKitAuthView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, *args, **kwargs):
-        if not all(
-            [
-                settings.IMAGEKIT_PUBLIC_KEY,
-                settings.IMAGEKIT_PRIVATE_KEY,
-                settings.IMAGEKIT_URL_ENDPOINT,
-            ]
-        ):
+        auth_params = ImageKitService.get_auth_params()
+        if not auth_params:
             return Response(
                 {"error": "ImageKit credentials not configured."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
-        imagekit = ImageKit(
-            public_key=settings.IMAGEKIT_PUBLIC_KEY,
-            private_key=settings.IMAGEKIT_PRIVATE_KEY,
-            url_endpoint=settings.IMAGEKIT_URL_ENDPOINT,
-        )
-        auth_params = imagekit.get_authentication_parameters()
         return Response(auth_params, status=status.HTTP_200_OK)
 
 
@@ -112,3 +102,20 @@ class PostDetailView(APIView):
 
         PostService.delete_post(post)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UserPostListView(generics.ListAPIView):
+    """
+    Returns a paginated list of posts specifically created by a user.
+    """
+
+    permission_classes = (AllowAny,)
+    serializer_class = PostSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        user_id = self.kwargs.get("user_id")
+        current_user = self.request.user if self.request.user.is_authenticated else None
+        return PostService.get_annotated_posts(current_user=current_user).filter(
+            author_id=user_id
+        )

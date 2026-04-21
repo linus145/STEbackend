@@ -142,21 +142,39 @@ class ProfileView(APIView, RequestResponseMixin):
         
         # Update Profile
         if profile_data:
+            from maincore.imagekit_utils import ImageKitService
+            profile_obj = None
             if user.role == user.ROLE_FOUNDER:
                 if not hasattr(user, 'founder_profile'):
                     from founders.models import Founder
                     Founder.objects.create(user=user)
-                profile_serializer = FounderUpdateSerializer(user.founder_profile, data=profile_data, partial=True)
+                profile_obj = user.founder_profile
+                profile_serializer = FounderUpdateSerializer(profile_obj, data=profile_data, partial=True)
             elif user.role == user.ROLE_INVESTOR:
                 if not hasattr(user, 'investor_profile'):
                     from investors.models import Investor
                     Investor.objects.create(user=user)
-                profile_serializer = InvestorUpdateSerializer(user.investor_profile, data=profile_data, partial=True)
+                profile_obj = user.investor_profile
+                profile_serializer = InvestorUpdateSerializer(profile_obj, data=profile_data, partial=True)
             else:
                 return self.build_response("error", "Invalid user role for profile update", {}, status.HTTP_400_BAD_REQUEST)
 
             if profile_serializer.is_valid():
+                # Track old images for cleanup
+                old_profile_image = profile_obj.profile_image_url if profile_obj else None
+                old_banner_image = profile_obj.banner_image_url if profile_obj else None
+                
+                new_profile_image = profile_data.get('profile_image_url')
+                new_banner_image = profile_data.get('banner_image_url')
+
                 profile_serializer.save()
+
+                # Perform cleanup if URLs changed and actually exist
+                if new_profile_image and old_profile_image and new_profile_image != old_profile_image:
+                    ImageKitService.delete_file(old_profile_image)
+                
+                if new_banner_image and old_banner_image and new_banner_image != old_banner_image:
+                    ImageKitService.delete_file(old_banner_image)
             else:
                 return self.build_response("error", "Profile validation failed", profile_serializer.errors, status.HTTP_400_BAD_REQUEST)
         
@@ -242,3 +260,15 @@ class WsTicketView(APIView):
                 status=status.HTTP_401_UNAUTHORIZED
             )
         return Response({"token": token}, status=status.HTTP_200_OK)
+
+class PublicProfileView(APIView, RequestResponseMixin):
+    permission_classes = (AllowAny,)
+
+    def get(self, request, user_id, *args, **kwargs):
+        from .models import CustomUser
+        try:
+            user = CustomUser.objects.get(id=user_id)
+            serializer = UserSerializer(user)
+            return self.build_response("success", "Public profile fetched successfully.", serializer.data, status.HTTP_200_OK)
+        except (CustomUser.DoesNotExist, ValueError):
+            return self.build_response("error", "User not found.", {}, status.HTTP_404_NOT_FOUND)

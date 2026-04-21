@@ -34,7 +34,11 @@ class PostService:
             .values("c")[:1]
         )
 
-        qs = Post.objects.select_related("author").annotate(
+        qs = Post.objects.select_related(
+            "author", 
+            "author__founder_profile", 
+            "author__investor_profile"
+        ).annotate(
             likes_count=Coalesce(
                 Subquery(likes_subquery, output_field=IntegerField()), 0
             ),
@@ -72,4 +76,7 @@ class PostService:
 
     @staticmethod
     def delete_post(post: Post):
+        if post.media_url:
+            from maincore.imagekit_utils import ImageKitService
+            ImageKitService.delete_file(post.media_url)
         post.delete()

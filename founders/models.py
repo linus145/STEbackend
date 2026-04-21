@@ -16,6 +16,7 @@ class Founder(SoftDeleteModel):
     bio = models.TextField(blank=True)
     location = models.CharField(max_length=100, blank=True)
     profile_image_url = models.URLField(max_length=500, blank=True)
+    banner_image_url = models.URLField(max_length=500, blank=True)
     experience_years = models.PositiveIntegerField(default=0)
     primary_industry = models.CharField(max_length=100, db_index=True, blank=True)
     skills = models.JSONField(default=list, blank=True)

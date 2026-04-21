@@ -9,7 +9,11 @@ class PostCommentsListView(generics.ListAPIView):
 
     def get_queryset(self):
         post_id = self.kwargs.get('post_id')
-        return Comment.objects.filter(post_id=post_id)
+        return Comment.objects.filter(post_id=post_id).select_related(
+            'user', 
+            'user__founder_profile', 
+            'user__investor_profile'
+        )
 
 class CommentCreateView(generics.CreateAPIView):
     serializer_class = CommentCreateSerializer

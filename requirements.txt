@@ -25,6 +25,7 @@ imagekitio==5.4.0
 Incremental==24.11.0
 msgpack==1.1.2
 packaging==26.1
+pillow==12.2.0
 psycopg2-binary==2.9.11
 py-ubjson==0.16.1
 pyasn1==0.6.3

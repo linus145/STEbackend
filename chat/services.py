@@ -80,3 +80,14 @@ class ChatService:
         except (ChatRoom.DoesNotExist, User.DoesNotExist) as e:
             logger.error(f"Chat save_message Failed: {e}")
             return None
+    @staticmethod
+    def delete_message(message_id: str, user: User) -> bool:
+        """
+        Soft deletes a message if the requester is the sender.
+        """
+        try:
+            message = Message.objects.get(id=message_id, sender=user)
+            message.delete() # Inherits SoftDeleteModel's delete
+            return True
+        except Message.DoesNotExist:
+            return False

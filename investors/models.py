@@ -15,6 +15,7 @@ class Investor(SoftDeleteModel):
     bio = models.TextField(blank=True)
     location = models.CharField(max_length=100, blank=True)
     profile_image_url = models.URLField(max_length=500, blank=True)
+    banner_image_url = models.URLField(max_length=500, blank=True)
     firm_name = models.CharField(max_length=255, blank=True)
     preferred_stages = models.JSONField(default=list, blank=True, help_text="e.g. Pre-seed, Seed, Series A")
     preferred_industries = models.JSONField(default=list, blank=True, help_text="e.g. AI, FinTech, HealthTech")

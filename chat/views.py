@@ -74,3 +74,17 @@ class MessageHistoryView(generics.ListAPIView):
         if qs is None:
             return [] # or handle 404 cleanly via exception overriding
         return qs
+class DeleteMessageView(APIView):
+    """
+    Deletes a specific message. Only permitted for the sender.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def delete(self, request, message_id, *args, **kwargs):
+        success = ChatService.delete_message(message_id, request.user)
+        if success:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(
+            {'error': 'Message not found or authorization denied.'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )

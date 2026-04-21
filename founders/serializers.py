@@ -10,7 +10,7 @@ class FounderSerializer(serializers.ModelSerializer):
         model = Founder
         fields = (
             'id', 'user_email', 'first_name', 'last_name', 
-            'headline', 'bio', 'location', 'profile_image_url',
+            'headline', 'bio', 'location', 'profile_image_url', 'banner_image_url',
             'experience_years', 'primary_industry', 
             'skills', 'linkedin_url', 'portfolio_url', 
             'created_at', 'updated_at'
@@ -21,7 +21,7 @@ class FounderUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Founder
         fields = (
-            'headline', 'bio', 'location', 'profile_image_url',
+            'headline', 'bio', 'location', 'profile_image_url', 'banner_image_url',
             'experience_years', 'primary_industry', 
             'skills', 'linkedin_url', 'portfolio_url'
         )
