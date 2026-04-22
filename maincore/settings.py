@@ -28,11 +28,17 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 SECRET_KEY = "django-insecure-nrup%h72z2z)#b%c#wpk(qvmrtr^)s(4a_rola*8*ll-(5pxq6"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = []
+# ALLOWED_HOSTS = []
 # ALLOWED_HOSTS = ['be2linq.com', 'www.be2linq.com']
-
+ALLOWED_HOSTS = [
+    'b2linq.in',
+    'www.b2linq.in',
+    '127.0.0.1',
+    'localhost',
+]
 
 # Application definition
 
@@ -49,6 +55,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
+    "drf_spectacular",
     # Local apps
     "useraccounts",
     "founders",
@@ -166,6 +173,8 @@ CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://b2linq.in",
+    "https://www.b2linq.in",
 ]
 CORS_ALLOW_CREDENTIALS = True
 
@@ -174,6 +183,15 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "useraccounts.authentication.CookieJWTAuthentication",
     ),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "STE API",
+    "DESCRIPTION": "Comprehensive API documentation for the Startup Ecosystem (STE) platform.",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    # OTHER SETTINGS
 }
 
 from datetime import timedelta
@@ -199,6 +217,8 @@ CSRF_COOKIE_SECURE = not DEBUG
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://b2linq.in",
+    "https://www.b2linq.in",
 ]
 
 # ImageKit configuration

@@ -47,8 +47,15 @@ def get_app_list(self, request, app_label=None):
 
 admin.AdminSite.get_app_list = get_app_list
 
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Swagger UI endpoints
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
+    
     path("api/auth/", include("useraccounts.urls")),
     path("api/founders/", include("founders.urls")),
     path("api/investors/", include("investors.urls")),
