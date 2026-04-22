@@ -272,3 +272,43 @@ class PublicProfileView(APIView, RequestResponseMixin):
             return self.build_response("success", "Public profile fetched successfully.", serializer.data, status.HTTP_200_OK)
         except (CustomUser.DoesNotExist, ValueError):
             return self.build_response("error", "User not found.", {}, status.HTTP_404_NOT_FOUND)
+
+class ChangePasswordView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        from .serializers import ChangePasswordSerializer
+        user = request.user
+        serializer = ChangePasswordSerializer(data=request.data)
+        if serializer.is_valid():
+            old_password = serializer.validated_data.get("old_password")
+            new_password = serializer.validated_data.get("new_password")
+            
+            if not user.check_password(old_password):
+                return self.build_response("error", "Incorrect current password", {}, status.HTTP_400_BAD_REQUEST)
+                
+            user.set_password(new_password)
+            user.save()
+            return self.build_response("success", "Password updated successfully", {}, status.HTTP_200_OK)
+        return self.build_response("error", "Validation failed", serializer.errors, status.HTTP_400_BAD_REQUEST)
+
+class UpdatePhoneNumberView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        from .serializers import UpdatePhoneNumberSerializer
+        user = request.user
+        serializer = UpdatePhoneNumberSerializer(data=request.data)
+        if serializer.is_valid():
+            phone_number = serializer.validated_data.get("phone_number")
+            
+            # Check if this phone number is already registered to another user
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            if User.objects.filter(phone_number=phone_number).exclude(id=user.id).exists():
+                return self.build_response("error", "This phone number is already registered.", {}, status.HTTP_400_BAD_REQUEST)
+                
+            user.phone_number = phone_number
+            user.save()
+            return self.build_response("success", "Phone number updated successfully", {"phone_number": phone_number}, status.HTTP_200_OK)
+        return self.build_response("error", "Validation failed", serializer.errors, status.HTTP_400_BAD_REQUEST)
