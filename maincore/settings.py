@@ -31,6 +31,7 @@ SECRET_KEY = "django-insecure-nrup%h72z2z)#b%c#wpk(qvmrtr^)s(4a_rola*8*ll-(5pxq6
 DEBUG = True
 
 ALLOWED_HOSTS = []
+# ALLOWED_HOSTS = ['be2linq.com', 'www.be2linq.com']
 
 
 # Application definition
@@ -59,6 +60,9 @@ INSTALLED_APPS = [
     "chat",
     "notifications",
     "comments",
+    "payments",
+    "AI",
+    "subscription"
 ]
 
 MIDDLEWARE = [
