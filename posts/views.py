@@ -5,7 +5,6 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
-from imagekitio import ImageKit
 
 from .serializers import PostSerializer, PostCreateUpdateSerializer
 from .services import PostService

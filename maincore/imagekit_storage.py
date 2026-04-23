@@ -1,19 +1,26 @@
 import os
+import logging
 from io import BytesIO
 from PIL import Image
 from django.core.files.storage import Storage
 from django.conf import settings
-from imagekitio import ImageKit
 from django.core.files.base import ContentFile
 from maincore.imagekit_utils import ImageKitService
 
+logger = logging.getLogger(__name__)
+
+
 class ImageKitStorage(Storage):
+    """
+    Custom Django Storage backend that uploads files directly to ImageKit CDN.
+    Used as a drop-in replacement for local file storage on model FileFields/ImageFields.
+    """
+
     def __init__(self):
-        # Using the same singleton instance from our utils
         self.client = ImageKitService.get_instance()
 
     def _save(self, name, content):
-        # Normalize path
+        # Normalize path separators
         name = name.replace("\\", "/")
 
         # Determine if it's an image that needs conversion
@@ -22,10 +29,9 @@ class ImageKitStorage(Storage):
 
         if ext in image_extensions:
             try:
-                # Open image and convert to WebP
                 img = Image.open(content)
 
-                # Convert to RGB if needed
+                # Handle transparency
                 if img.mode in ("RGBA", "LA"):
                     pass
                 elif img.mode != "RGB":
@@ -35,12 +41,10 @@ class ImageKitStorage(Storage):
                 img.save(buffer, format="WEBP", quality=80)
                 buffer.seek(0)
 
-                # Update content and name
                 content = ContentFile(buffer.read())
                 name = os.path.splitext(name)[0] + ".webp"
             except Exception as e:
-                # If conversion fails, proceed with original
-                print(f"DEBUG: Storage conversion failed: {e}")
+                logger.warning(f"Storage WebP conversion failed: {e}")
                 if hasattr(content, "seek"):
                     content.seek(0)
 
@@ -50,22 +54,33 @@ class ImageKitStorage(Storage):
         # Ensure we are at the start of the file
         content.seek(0)
 
-        # Upload to ImageKit
-        res = self.client.files.upload(
-            file=content.read(),
-            file_name=filename,
-            folder=folder if folder else "/",
-            use_unique_file_name=True,
-        )
+        if not self.client:
+            logger.error("ImageKit client unavailable. Cannot save file.")
+            return name
 
-        if hasattr(res, "url"):
-            return res.url
+        try:
+            file_bytes = content.read()
+
+            res = self.client.files.upload(
+                file=file_bytes,
+                file_name=filename,
+                folder=folder if folder else "/",
+                use_unique_file_name=True,
+            )
+
+            if hasattr(res, "url"):
+                logger.info(f"Storage upload success: {res.url}")
+                return res.url
+
+            logger.error(f"Storage upload returned no URL: {res}")
+        except Exception as e:
+            logger.exception(f"Storage upload failed: {e}")
 
         return name
 
     def url(self, name):
         # If name is already a full URL, return it
-        if name.startswith("http"):
+        if name and name.startswith("http"):
             return name
         # Otherwise, prepend endpoint
         return f"{settings.IMAGEKIT_URL_ENDPOINT.rstrip('/')}/{name.lstrip('/')}"

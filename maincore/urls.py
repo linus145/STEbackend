@@ -53,8 +53,12 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 
+from maincore.upload_views import ImageUploadView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Server-side image upload endpoint
+    path("api/upload/image/", ImageUploadView.as_view(), name="image-upload"),
     # Swagger UI endpoints
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path(
