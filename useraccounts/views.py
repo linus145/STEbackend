@@ -10,6 +10,11 @@ from .serializers import RegisterSerializer, LoginSerializer, UserSerializer, Lo
 from founders.serializers import FounderUpdateSerializer
 from investors.serializers import InvestorUpdateSerializer
 from .services import UserService
+from google.oauth2 import id_token
+from google.auth.transport import requests
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from django.shortcuts import redirect
 
 class RequestResponseMixin:
     """Helper to maintain standardized structured JSON output globally"""
@@ -312,3 +317,42 @@ class UpdatePhoneNumberView(APIView, RequestResponseMixin):
             user.save()
             return self.build_response("success", "Phone number updated successfully", {"phone_number": phone_number}, status.HTTP_200_OK)
         return self.build_response("error", "Validation failed", serializer.errors, status.HTTP_400_BAD_REQUEST)
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GoogleLoginView(APIView, RequestResponseMixin):
+    permission_classes = (AllowAny,)
+
+    def post(self, request, *args, **kwargs):
+        # In redirect mode, Google sends data as form-data
+        token = request.data.get('credential') or request.POST.get('credential')
+        
+        if not token:
+            print("DEBUG: No credential found in request")
+            return redirect(f"{settings.FRONTEND_URL}/login?error=no_token")
+
+        try:
+            print(f"DEBUG: Verifying Google Token...")
+            idinfo = id_token.verify_oauth2_token(token, requests.Request(), settings.GOOGLE_OAUTH_CLIENT_ID)
+
+            google_id = idinfo['sub']
+            email = idinfo['email']
+            print(f"DEBUG: Google User Verified: {email}")
+            
+            first_name = idinfo.get('given_name', '')
+            last_name = idinfo.get('family_name', '')
+
+            user = UserService.get_or_create_google_user(email, first_name, last_name, google_id)
+            
+            tokens = UserService.generate_tokens(user)
+            
+            # Create response that redirects back to frontend dashboard
+            response = redirect(f"{settings.FRONTEND_URL}/dashboard")
+            _set_auth_cookies(response, tokens['access'], tokens['refresh'])
+            return response
+
+        except ValueError as e:
+            print(f"DEBUG: Token verification failed: {str(e)}")
+            return redirect(f"{settings.FRONTEND_URL}/login?error=invalid_token")
+        except Exception as e:
+            print(f"DEBUG: Google Login Exception: {str(e)}")
+            return redirect(f"{settings.FRONTEND_URL}/login?error=server_error")

@@ -71,3 +71,33 @@ class UserService:
         user.is_verified = True
         user.save(update_fields=['is_verified'])
         return user
+
+    @staticmethod
+    def get_or_create_google_user(email: str, first_name: str, last_name: str, google_id: str) -> User:
+        """
+        Retrieves an existing user by email or google_id, or creates a new one.
+        Ensures the user is verified and google_id is linked.
+        """
+        user = User.objects.filter(google_id=google_id).first()
+        if not user:
+            user = User.objects.filter(email=email).first()
+            if user:
+                # Link existing user to google_id
+                user.google_id = google_id
+                user.is_verified = True
+                user.save(update_fields=['google_id', 'is_verified'])
+            else:
+                # Create new user
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        email=email,
+                        password=None,  # Google users don't need a local password initially
+                        first_name=first_name,
+                        last_name=last_name,
+                        role=User.ROLE_FOUNDER, # Default role
+                        google_id=google_id,
+                        is_verified=True
+                    )
+                    # Create default profile
+                    Founder.objects.create(user=user)
+        return user

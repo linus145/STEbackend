@@ -28,8 +28,13 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 SECRET_KEY = "django-insecure-nrup%h72z2z)#b%c#wpk(qvmrtr^)s(4a_rola*8*ll-(5pxq6"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# DEBUG = True
 # DEBUG = False
+
+
+ENV = os.environ.get("ENV", "local")
+
+DEBUG = os.environ.get("DEBUG", "False") == "True"
 
 # ALLOWED_HOSTS = []
 # ALLOWED_HOSTS = ['B2linq.com', 'www.B2linq.com']
@@ -104,11 +109,23 @@ TEMPLATES = [
 WSGI_APPLICATION = "maincore.wsgi.application"
 ASGI_APPLICATION = "maincore.asgi.application"
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    },
-}
+if DEBUG:
+    # Local development: no Redis needed
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
+else:
+    # Production: Redis required for multi-worker WebSocket support
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")],
+            },
+        },
+    }
 
 
 # Database
@@ -237,3 +254,7 @@ CSRF_TRUSTED_ORIGINS = [
 IMAGEKIT_PUBLIC_KEY = os.environ.get("IMAGEKIT_PUBLIC_KEY", "")
 IMAGEKIT_PRIVATE_KEY = os.environ.get("IMAGEKIT_PRIVATE_KEY", "")
 IMAGEKIT_URL_ENDPOINT = os.environ.get("IMAGEKIT_URL_ENDPOINT", "")
+
+# Google OAuth
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
