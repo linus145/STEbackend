@@ -34,7 +34,9 @@ SECRET_KEY = "django-insecure-nrup%h72z2z)#b%c#wpk(qvmrtr^)s(4a_rola*8*ll-(5pxq6
 
 ENV = os.environ.get("ENV", "local")
 
-DEBUG = os.environ.get("DEBUG", "False") == "True"
+DEBUG = True
+
+# DEBUG = os.environ.get("DEBUG", "False") == "True"
 
 # ALLOWED_HOSTS = []
 # ALLOWED_HOSTS = ['B2linq.com', 'www.B2linq.com']
@@ -75,6 +77,8 @@ INSTALLED_APPS = [
     "payments",
     "AI",
     "subscription",
+    "jobs",
+    "seo",
 ]
 
 MIDDLEWARE = [
