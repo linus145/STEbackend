@@ -102,38 +102,39 @@ class NetworkPeopleView(APIView):
         # Start with a base queryset excluding the current user immediately
         base_qs = User.objects.filter(role=role).exclude(id=request.user.id)
 
-        # Optionally exclude people I'm already connected with or have a pending request with
-        exclude_existing = (
-            request.query_params.get("exclude_existing", "false") == "true"
-        )
-        if exclude_existing:
-            # Find all users I have a PENDING or ACCEPTED connection with
-            # We use .objects (not all_objects) so COMPLETED/DELETED connections are gone from this list
-            # and we specifically exclude REJECTED so they become discoverable again.
-            active_connections = Connection.objects.filter(
-                models.Q(sender=request.user) | models.Q(receiver=request.user)
-            ).exclude(status=Connection.STATUS_REJECTED)
-
-            # Flatten and get unique IDs
-            exclude_ids = {request.user.id}  # Always exclude self
-            for conn in active_connections:
-                exclude_ids.add(conn.sender_id)
-                exclude_ids.add(conn.receiver_id)
-
-            base_qs = base_qs.exclude(id__in=exclude_ids)
+        # Get all connections for the current user to inject status
+        connections = Connection.objects.filter(
+            models.Q(sender=request.user) | models.Q(receiver=request.user)
+        ).exclude(status=Connection.STATUS_REJECTED)
+        
+        connection_map = {}
+        for conn in connections:
+            other_id = conn.receiver_id if conn.sender_id == request.user.id else conn.sender_id
+            connection_map[str(other_id)] = {
+                "id": str(conn.id),
+                "status": conn.status,
+                "is_incoming": conn.receiver_id == request.user.id,
+            }
 
         serializer = UserSerializer(base_qs, many=True)
-        return Response(serializer.data)
+        results = serializer.data
+        
+        # Inject connection info
+        for user_data in results:
+            user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+
+        return Response(results)
 
 
 class MyConnectionsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        # Fetch connections using the default manager (excludes DELETED)
+        # Fetch ONLY ACCEPTED connections for "My Connections"
         connections = Connection.objects.filter(
-            (models.Q(sender=request.user) | models.Q(receiver=request.user))
-        ).exclude(status=Connection.STATUS_REJECTED)
+            (models.Q(sender=request.user) | models.Q(receiver=request.user)),
+            status=Connection.STATUS_ACCEPTED
+        )
 
         results = []
         seen_user_ids = set()
@@ -151,6 +152,31 @@ class MyConnectionsView(APIView):
                 }
                 results.append(user_data)
                 seen_user_ids.add(other_user.id)
+
+        return Response(results)
+
+
+class InvitationsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        # Fetch PENDING incoming connection requests
+        connections = Connection.objects.filter(
+            receiver=request.user,
+            status=Connection.STATUS_PENDING
+        )
+
+        results = []
+        for conn in connections:
+            user_data = UserSerializer(conn.sender).data
+            user_data["connection_info"] = {
+                "id": str(conn.id),
+                "status": conn.status,
+                "is_incoming": True,
+                "sender_id": str(conn.sender.id),
+                "created_at": conn.created_at
+            }
+            results.append(user_data)
 
         return Response(results)
 
