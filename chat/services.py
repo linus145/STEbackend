@@ -23,18 +23,19 @@ class ChatService:
     def get_or_create_1to1_room(user1: User, user2: User) -> ChatRoom:
         """
         Retrieves or safely creates a 1-to-1 chat room between two users.
+        Ensures a fresh chat is created if no active room exists.
         """
         if user1 == user2:
             raise ValueError("Users cannot create a chat room with themselves.")
 
-        # Natively check if an exact 1-to-1 room exists using aggregation
+        # Check for an active 1-to-1 room
         rooms = ChatRoom.objects.filter(is_group=False).annotate(p_count=Count('participants')).filter(p_count=2)
         rooms = rooms.filter(participants=user1).filter(participants=user2)
         
         if rooms.exists():
             return rooms.first()
 
-        # If it doesn't exist, utilize atomicity to safely create
+        # If it doesn't exist, utilize atomicity to safely create a NEW room
         with transaction.atomic():
             room = ChatRoom.objects.create(is_group=False)
             room.participants.add(user1, user2)

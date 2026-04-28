@@ -200,6 +200,17 @@ class DisconnectView(APIView):
                 )
 
             connection.delete()
+
+            # Also soft-delete the 1-to-1 chat room if it exists
+            from chat.models import ChatRoom
+            from django.db.models import Count
+            
+            # Find 1-to-1 rooms where both users are participants
+            rooms = ChatRoom.objects.filter(is_group=False).annotate(p_count=Count('participants')).filter(p_count=2)
+            room = rooms.filter(participants=request.user).filter(participants__id=pk).first()
+            if room:
+                room.delete()
+
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
