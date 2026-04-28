@@ -83,11 +83,13 @@ class Connection(SoftDeleteModel):
     STATUS_PENDING = 'PENDING'
     STATUS_ACCEPTED = 'ACCEPTED'
     STATUS_REJECTED = 'REJECTED'
+    STATUS_DISCONNECTED = 'DISCONNECTED'
 
     STATUS_CHOICES = (
         (STATUS_PENDING, 'Pending'),
         (STATUS_ACCEPTED, 'Accepted'),
         (STATUS_REJECTED, 'Rejected'),
+        (STATUS_DISCONNECTED, 'Disconnected'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

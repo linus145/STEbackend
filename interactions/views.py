@@ -105,7 +105,7 @@ class NetworkPeopleView(APIView):
         # Get all connections for the current user to inject status
         connections = Connection.objects.filter(
             models.Q(sender=request.user) | models.Q(receiver=request.user)
-        ).exclude(status=Connection.STATUS_REJECTED)
+        ).exclude(status__in=[Connection.STATUS_REJECTED, Connection.STATUS_DISCONNECTED])
         
         connection_map = {}
         for conn in connections:
@@ -199,17 +199,25 @@ class DisconnectView(APIView):
                     {"error": "Connection not found"}, status=status.HTTP_404_NOT_FOUND
                 )
 
-            connection.delete()
+            # Update status instead of hard/soft deleting the connection object
+            connection.status = Connection.STATUS_DISCONNECTED
+            connection.save()
 
-            # Also soft-delete the 1-to-1 chat room if it exists
-            from chat.models import ChatRoom
+            # Deactivate the associated 1-to-1 chat room
+            from chat.models import ChatRoom, Message
             from django.db.models import Count
             
-            # Find 1-to-1 rooms where both users are participants
-            rooms = ChatRoom.objects.filter(is_group=False).annotate(p_count=Count('participants')).filter(p_count=2)
-            room = rooms.filter(participants=request.user).filter(participants__id=pk).first()
-            if room:
-                room.delete()
+            # Find rooms linked to this connection OR matching these participants (legacy fallback)
+            rooms = ChatRoom.objects.filter(
+                models.Q(connection=connection) | 
+                (models.Q(is_group=False) & models.Q(participants=request.user) & models.Q(participants__id=pk))
+            ).annotate(p_count=Count('participants')).filter(p_count=2, is_active=True)
+
+            for room in rooms:
+                room.is_active = False
+                room.save()
+                # Ensure messages are soft-deleted as well
+                Message.objects.filter(room=room).delete()
 
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
@@ -251,9 +259,10 @@ class ConnectionRequestView(APIView):
         ).first()
 
         if connection:
-            if connection.is_deleted:
-                # Restore the soft-deleted connection
-                connection.restore()
+            if connection.is_deleted or connection.status == Connection.STATUS_DISCONNECTED:
+                # Restore or reset the connection for a new request
+                if connection.is_deleted:
+                    connection.restore()
                 connection.status = Connection.STATUS_PENDING
                 connection.sender = request.user
                 connection.receiver = receiver
@@ -296,4 +305,9 @@ class ConnectionRequestView(APIView):
 
         connection.status = new_status
         connection.save()
+
+        if new_status == Connection.STATUS_ACCEPTED:
+            from chat.services import ChatService
+            ChatService.get_or_create_1to1_room(connection.sender, connection.receiver)
+
         return Response(ConnectionSerializer(connection).data)

@@ -13,6 +13,14 @@ class ChatRoom(SoftDeleteModel):
         related_name='chat_rooms',
         db_index=True
     )
+    connection = models.ForeignKey(
+        'interactions.Connection',
+        on_delete=models.CASCADE,
+        related_name='chat_rooms',
+        null=True,
+        blank=True
+    )
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
