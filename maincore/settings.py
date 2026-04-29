@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     "subscription",
     "jobs",
     "seo",
+    "publicpages"
 ]
 
 MIDDLEWARE = [

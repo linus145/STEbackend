@@ -80,5 +80,6 @@ urlpatterns = [
     path("api/news/", include("news.urls")),
     path("api/subscription/", include("subscription.urls")),
     path("api/ai/", include("AI.urls")),
-    path("api/seo",include("seo.urls"))
+    path("api/seo/", include("seo.urls")),
+    path("api/publicpages/", include("publicpages.urls"))
 ]
