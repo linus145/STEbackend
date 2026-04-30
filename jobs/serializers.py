@@ -37,6 +37,7 @@ class JobPostListSerializer(serializers.ModelSerializer):
             "skills_required",
             "experience_level",
             "status",
+            "hiring_status",
             "deadline",
             "applications_count",
             "company_is_genuine",
@@ -67,6 +68,7 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
             "skills_required",
             "experience_level",
             "status",
+            "hiring_status",
             "deadline",
             "applications_count",
             "created_at",
@@ -91,6 +93,7 @@ class JobPostCreateSerializer(serializers.ModelSerializer):
             "skills_required",
             "experience_level",
             "status",
+            "hiring_status",
             "deadline",
         )
 
@@ -131,6 +134,7 @@ class JobPostUpdateSerializer(serializers.ModelSerializer):
             "skills_required",
             "experience_level",
             "status",
+            "hiring_status",
             "deadline",
         )
 

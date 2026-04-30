@@ -37,13 +37,16 @@ class JobService:
         return jobs.order_by("-created_at")
 
     @staticmethod
-    def get_recruiter_jobs(company):
+    def get_recruiter_jobs(company, status: str = None):
         """
         Retrieves all jobs for a specific company with optimized counts.
         """
-        return company.job_posts.filter(is_deleted=False).annotate(
+        jobs = company.job_posts.filter(is_deleted=False).annotate(
             applications_count=Count("applications", filter=Q(applications__is_deleted=False))
-        ).order_by("-created_at")
+        )
+        if status:
+            jobs = jobs.filter(status=status)
+        return jobs.order_by("-created_at")
 
     @staticmethod
     def apply_to_job(user, job_id: str, validated_data: dict):

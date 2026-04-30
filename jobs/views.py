@@ -79,7 +79,8 @@ class RecruiterJobListView(ListAPIView, ResponseMixin):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        return JobService.get_recruiter_jobs(self.request.user.company_profile)
+        status_filter = self.request.query_params.get("status")
+        return JobService.get_recruiter_jobs(self.request.user.company_profile, status=status_filter)
 
     def post(self, request):
         if not request.user.company_profile.is_approved:
@@ -147,7 +148,11 @@ class JobApplicationsView(ListAPIView, ResponseMixin):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        return JobApplication.objects.filter(job_id=self.kwargs["job_id"], is_deleted=False).select_related("applicant")
+        qs = JobApplication.objects.filter(job_id=self.kwargs["job_id"], is_deleted=False).select_related("applicant")
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs
 
 
 class UpdateApplicationStatusView(APIView, ResponseMixin):
@@ -169,4 +174,9 @@ class MyApplicationsView(ListAPIView, ResponseMixin):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        return JobApplication.objects.filter(applicant=self.request.user, is_deleted=False).select_related("job", "job__company")
+        qs = JobApplication.objects.filter(applicant=self.request.user, is_deleted=False).select_related("job", "job__company")
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs
+

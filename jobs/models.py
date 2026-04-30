@@ -37,6 +37,11 @@ class JobPost(SoftDeleteModel):
         ("CLOSED", "Closed"),
     )
 
+    HIRING_STATUS_CHOICES = (
+        ("ACTIVELY_HIRING", "Actively Hiring"),
+        ("ACTIVELY_REVIEWING", "Actively Reviewing"),
+    )
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(
         'startups.CompanyProfile',
@@ -66,6 +71,9 @@ class JobPost(SoftDeleteModel):
     )
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="DRAFT", db_index=True
+    )
+    hiring_status = models.CharField(
+        max_length=30, choices=HIRING_STATUS_CHOICES, default="ACTIVELY_HIRING"
     )
     deadline = models.DateTimeField(null=True, blank=True)
 
