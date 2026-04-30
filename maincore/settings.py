@@ -295,6 +295,13 @@ SIMPLE_JWT = {
     "AUTH_COOKIE_SAMESITE": "Lax",  # 'None' if cross-domain in prod
 }
 
+# Nginx Reverse Proxy SSL Termination Settings
+# Tells Django that if the X-Forwarded-Proto header says 'https', the request is secure
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+# Let Nginx handle HTTP -> HTTPS redirects. If Django does this behind Nginx, it causes an infinite redirect loop.
+SECURE_SSL_REDIRECT = False
+
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 CSRF_TRUSTED_ORIGINS = [
