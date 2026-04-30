@@ -18,12 +18,27 @@ def get_user_from_token(token):
         return AnonymousUser()
 
 
+@database_sync_to_async
+def get_user_from_ticket(ticket_id):
+    """Validate a one-time ticket and return the user."""
+    from useraccounts.models import WsTicket
+    try:
+        ticket = WsTicket.objects.get(id=ticket_id)
+        if ticket.is_valid():
+            ticket.is_used = True
+            ticket.save()
+            return ticket.user
+    except Exception:
+        pass
+    return AnonymousUser()
+
+
 class JWTAuthMiddleware:
     """
     Django Channels middleware that authenticates WebSocket connections
-    using JWT tokens from either:
-      1. Query string: ws://host/ws/chat/<id>/?token=<jwt>
-      2. Cookie header: uses the AUTH_COOKIE name from SIMPLE_JWT settings
+    using either:
+      1. One-time ticket (Secure): ws://host/ws/chat/?ticket=<uuid>
+      2. HttpOnly Cookie (Fallback): uses AUTH_COOKIE
     """
 
     def __init__(self, inner):
@@ -33,15 +48,18 @@ class JWTAuthMiddleware:
         from urllib.parse import parse_qs
         from http.cookies import SimpleCookie
 
-        token = None
+        user = AnonymousUser()
 
-        # 1. Query string  (?token=...)
+        # 1. Check for one-time ticket (Highest Security)
         query_string = scope.get("query_string", b"").decode("utf-8")
         query_params = parse_qs(query_string)
-        token = query_params.get("token", [None])[0]
+        ticket_id = query_params.get("ticket", [None])[0] or query_params.get("token", [None])[0]
 
-        # 2. Cookie header
-        if not token:
+        if ticket_id:
+            user = await get_user_from_ticket(ticket_id)
+
+        # 2. Fallback to Cookie header if ticket is missing or invalid
+        if user.is_anonymous:
             headers = dict(scope.get("headers", []))
             cookie_header = headers.get(b"cookie", b"").decode("utf-8")
             if cookie_header:
@@ -50,10 +68,7 @@ class JWTAuthMiddleware:
                 cookie_name = settings.SIMPLE_JWT.get("AUTH_COOKIE", "access_token")
                 if cookie_name in cookie:
                     token = cookie[cookie_name].value
+                    user = await get_user_from_token(token)
 
-        if token:
-            scope["user"] = await get_user_from_token(token)
-        else:
-            scope["user"] = AnonymousUser()
-
+        scope["user"] = user
         return await self.inner(scope, receive, send)

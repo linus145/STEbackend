@@ -67,3 +67,21 @@ class CustomUser(AbstractBaseUser, PermissionsMixin, SoftDeleteModel):
 
     def is_admin(self) -> bool:
         return self.role == self.ROLE_ADMIN
+
+class WsTicket(models.Model):
+    """
+    A short-lived, one-time use ticket for WebSocket authentication.
+    Prevents exposure of raw JWT tokens to frontend JS.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="ws_tickets")
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def is_valid(self):
+        # Tickets expire after 30 seconds
+        expiration_time = self.created_at + timezone.timedelta(seconds=30)
+        return not self.is_used and timezone.now() < expiration_time

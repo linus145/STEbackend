@@ -248,23 +248,15 @@ class CookieTokenRefreshView(TokenRefreshView):
 
 class WsTicketView(APIView):
     """
-    Returns the current access token so the frontend can pass it
-    as a query parameter when opening a WebSocket connection.
-    HTTPOnly cookies are invisible to JavaScript, so this
-    authenticated endpoint is the bridge.
+    Returns a one-time use ticket (UUID) for WebSocket authentication.
+    Prevents HttpOnly cookie bypass or raw JWT exposure in query strings.
     """
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, *args, **kwargs):
-        token = request.COOKIES.get(
-            settings.SIMPLE_JWT.get('AUTH_COOKIE', 'access_token')
-        )
-        if not token:
-            return Response(
-                {"error": "No access token found"},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        return Response({"token": token}, status=status.HTTP_200_OK)
+        from .models import WsTicket
+        ticket = WsTicket.objects.create(user=request.user)
+        return Response({"token": str(ticket.id)}, status=status.HTTP_200_OK)
 
 class PublicProfileView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)

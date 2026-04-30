@@ -162,18 +162,29 @@ class ImageKitService:
                 folder = "/" + folder
             filename = os.path.basename(path_val)
 
-            # Search for file in ImageKit using the REST API
+            # Search for file in ImageKit using the REST API (with native retry & exponential backoff)
             import httpx
+            import time
+            
+            response = None
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    search_url = "https://api.imagekit.io/v1/files"
+                    response = httpx.get(
+                        search_url,
+                        params={"name": filename, "path": folder},
+                        auth=(settings.IMAGEKIT_PRIVATE_KEY, ""),
+                        timeout=5.0,
+                    )
+                    if response.status_code == 200:
+                        break
+                except httpx.RequestError as e:
+                    if attempt == max_retries - 1:
+                        raise e
+                    time.sleep(2 ** attempt)
 
-            search_url = "https://api.imagekit.io/v1/files"
-            response = httpx.get(
-                search_url,
-                params={"name": filename, "path": folder},
-                auth=(settings.IMAGEKIT_PRIVATE_KEY, ""),
-                timeout=10.0,
-            )
-
-            if response.status_code == 200:
+            if response and response.status_code == 200:
                 file_list = response.json()
                 for f in file_list:
                     if f.get("name") == filename and f.get("fileId"):

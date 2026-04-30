@@ -1,5 +1,6 @@
 from django.db import models
 from rest_framework import status, generics, permissions
+from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
@@ -18,10 +19,7 @@ from useraccounts.serializers import UserSerializer
 User = get_user_model()
 
 
-class StandardResultsSetPagination(PageNumberPagination):
-    page_size = 20
-    page_size_query_param = "page_size"
-    max_page_size = 100
+from maincore.pagination import StandardResultsSetPagination
 
 
 class ToggleLikeView(APIView):
@@ -93,92 +91,141 @@ class CommentDeleteView(APIView):
         )
 
 
-class NetworkPeopleView(APIView):
+class NetworkPeopleView(ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserSerializer
+    pagination_class = StandardResultsSetPagination
 
-    def get(self, request):
-        role = request.query_params.get("role", "FOUNDER")
+    def get_queryset(self):
+        role = self.request.query_params.get("role", "FOUNDER")
+        return User.objects.filter(role=role).exclude(id=self.request.user.id).select_related('founder_profile', 'investor_profile')
 
-        # Start with a base queryset excluding the current user immediately
-        base_qs = User.objects.filter(role=role).exclude(id=request.user.id)
-
-        # Get all connections for the current user to inject status
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        
+        # Get connections for the current user to inject status efficiently
         connections = Connection.objects.filter(
             models.Q(sender=request.user) | models.Q(receiver=request.user)
         ).exclude(status__in=[Connection.STATUS_REJECTED, Connection.STATUS_DISCONNECTED])
         
-        connection_map = {}
-        for conn in connections:
-            other_id = conn.receiver_id if conn.sender_id == request.user.id else conn.sender_id
-            connection_map[str(other_id)] = {
+        connection_map = {
+            str(conn.receiver_id if conn.sender_id == request.user.id else conn.sender_id): {
                 "id": str(conn.id),
                 "status": conn.status,
                 "is_incoming": conn.receiver_id == request.user.id,
-            }
+            } for conn in connections
+        }
 
-        serializer = UserSerializer(base_qs, many=True)
-        results = serializer.data
-        
-        # Inject connection info
-        for user_data in results:
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            for user_data in serializer.data:
+                user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        for user_data in serializer.data:
             user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+        return Response(serializer.data)
 
-        return Response(results)
 
-
-class MyConnectionsView(APIView):
+class MyConnectionsView(ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserSerializer
+    pagination_class = StandardResultsSetPagination
 
-    def get(self, request):
+    def get_queryset(self):
         # Fetch ONLY ACCEPTED connections for "My Connections"
+        connections = Connection.objects.filter(
+            (models.Q(sender=self.request.user) | models.Q(receiver=self.request.user)),
+            status=Connection.STATUS_ACCEPTED
+        ).select_related('sender', 'receiver', 'sender__founder_profile', 'receiver__founder_profile')
+        
+        # This is a bit tricky with pagination if we want to return Users instead of Connections
+        # Let's return the Users directly using a subquery or filtered queryset
+        user_ids = Connection.objects.filter(
+            (models.Q(sender=self.request.user) | models.Q(receiver=self.request.user)),
+            status=Connection.STATUS_ACCEPTED
+        ).values_list('sender_id', 'receiver_id')
+        
+        flat_ids = set()
+        for s_id, r_id in user_ids:
+            if s_id != self.request.user.id: flat_ids.add(s_id)
+            if r_id != self.request.user.id: flat_ids.add(r_id)
+            
+        return User.objects.filter(id__in=flat_ids).select_related('founder_profile', 'investor_profile')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        
+        # Map connection info for injection
         connections = Connection.objects.filter(
             (models.Q(sender=request.user) | models.Q(receiver=request.user)),
             status=Connection.STATUS_ACCEPTED
         )
+        connection_map = {
+            str(conn.sender_id if conn.receiver_id == request.user.id else conn.receiver_id): {
+                "id": str(conn.id),
+                "status": conn.status,
+                "is_incoming": conn.receiver_id == request.user.id,
+                "sender_id": str(conn.sender_id),
+            } for conn in connections
+        }
 
-        results = []
-        seen_user_ids = set()
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            for user_data in serializer.data:
+                user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+            return self.get_paginated_response(serializer.data)
 
-        for conn in connections:
-            other_user = conn.receiver if conn.sender == request.user else conn.sender
-            if other_user.id != request.user.id and other_user.id not in seen_user_ids:
-                user_data = UserSerializer(other_user).data
-                # Inject connection metadata for the frontend
-                user_data["connection_info"] = {
-                    "id": str(conn.id),
-                    "status": conn.status,
-                    "is_incoming": conn.receiver == request.user,
-                    "sender_id": str(conn.sender.id),
-                }
-                results.append(user_data)
-                seen_user_ids.add(other_user.id)
-
-        return Response(results)
+        serializer = self.get_serializer(queryset, many=True)
+        for user_data in serializer.data:
+            user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+        return Response(serializer.data)
 
 
-class InvitationsView(APIView):
+class InvitationsView(ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserSerializer
+    pagination_class = StandardResultsSetPagination
 
-    def get(self, request):
-        # Fetch PENDING incoming connection requests
+    def get_queryset(self):
+        # Fetch users who sent PENDING connection requests
+        return User.objects.filter(
+            sent_connections__receiver=self.request.user,
+            sent_connections__status=Connection.STATUS_PENDING
+        ).select_related('founder_profile', 'investor_profile')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        
+        # Get connection details for injection
         connections = Connection.objects.filter(
             receiver=request.user,
             status=Connection.STATUS_PENDING
         )
-
-        results = []
-        for conn in connections:
-            user_data = UserSerializer(conn.sender).data
-            user_data["connection_info"] = {
+        connection_map = {
+            str(conn.sender_id): {
                 "id": str(conn.id),
                 "status": conn.status,
                 "is_incoming": True,
-                "sender_id": str(conn.sender.id),
+                "sender_id": str(conn.sender_id),
                 "created_at": conn.created_at
-            }
-            results.append(user_data)
+            } for conn in connections
+        }
 
-        return Response(results)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            for user_data in serializer.data:
+                user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        for user_data in serializer.data:
+            user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+        return Response(serializer.data)
 
 
 class DisconnectView(APIView):
