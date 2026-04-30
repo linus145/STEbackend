@@ -194,10 +194,9 @@ class JobApplicationCreateSerializer(serializers.ModelSerializer):
         fields = ("resume_url", "cover_letter")
 
 
-class JobApplicationStatusSerializer(serializers.Serializer):
+class JobApplicationStatusSerializer(serializers.ModelSerializer):
     """Serializer for updating application status by recruiter."""
 
-    status = serializers.ChoiceField(
-        choices=JobApplication.STATUS_CHOICES,
-        required=True,
-    )
+    class Meta:
+        model = JobApplication
+        fields = ("status",)
