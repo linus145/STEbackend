@@ -19,7 +19,7 @@ class PostSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'author_id', 'author_email', 'author_first_name', 'author_role', 
             'author_image_url', 'author_linkedin_url',
-            'content', 'media_url', 'likes_count', 'comments_count', 
+            'content', 'media_url', 'visibility', 'likes_count', 'comments_count', 
             'user_has_liked', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
@@ -43,7 +43,7 @@ class PostSerializer(serializers.ModelSerializer):
 class PostCreateUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Post
-        fields = ('content', 'media_url')
+        fields = ('content', 'media_url', 'visibility')
 
     def validate_content(self, value):
         if len(value) > 1800:

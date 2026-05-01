@@ -53,6 +53,12 @@ class PostService:
                 post=OuterRef("pk"), user=current_user
             )
             qs = qs.annotate(user_has_liked=Exists(has_liked_subquery))
+            
+            # Visibility filtering: Show public posts OR posts where the viewer is the author
+            qs = qs.filter(Q(visibility='PUBLIC') | Q(author=current_user))
+        else:
+            # Anonymous users only see public posts
+            qs = qs.filter(visibility='PUBLIC')
 
         return qs.order_by("-created_at")
 

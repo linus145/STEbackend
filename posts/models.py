@@ -15,6 +15,17 @@ class Post(SoftDeleteModel):
     content = models.TextField()
     media_url = models.URLField(max_length=500, blank=True, null=True)
     
+    VISIBILITY_CHOICES = [
+        ('PUBLIC', 'Public'),
+        ('PRIVATE', 'Private'),
+    ]
+    visibility = models.CharField(
+        max_length=10, 
+        choices=VISIBILITY_CHOICES, 
+        default='PUBLIC',
+        db_index=True
+    )
+    
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
