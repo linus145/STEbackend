@@ -19,4 +19,7 @@ urlpatterns = [
 
     # ─── Dashboard Stats ────────────────────────────────────────
     path("dashboard/stats/", views.RecruiterDashboardStatsView.as_view(), name="recruiter-dashboard-stats"),
+
+    # ─── Skills ──────────────────────────────────────────────────
+    path("skills/", views.SkillListView.as_view(), name="skill-list"),
 ]

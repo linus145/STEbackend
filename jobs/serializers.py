@@ -1,7 +1,13 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from startups.serializers import CompanyProfileSerializer, CompanyHRProfileSerializer
-from .models import JobPost, JobApplication
+from .models import JobPost, JobApplication, Skill
+
+class SkillSerializer(serializers.ModelSerializer):
+    """Serializer for the Skill model."""
+    class Meta:
+        model = Skill
+        fields = ("id", "name", "category")
 
 User = get_user_model()
 
@@ -18,6 +24,7 @@ class JobPostListSerializer(serializers.ModelSerializer):
     company_is_genuine = serializers.BooleanField(source="company.is_genuine", read_only=True)
     hr_profile = CompanyHRProfileSerializer(source="company.hr_profile", read_only=True)
     applications_count = serializers.IntegerField(read_only=True)
+    skills = SkillSerializer(many=True, read_only=True)
 
     class Meta:
         model = JobPost
@@ -34,6 +41,7 @@ class JobPostListSerializer(serializers.ModelSerializer):
             "salary_min",
             "salary_max",
             "currency",
+            "skills",
             "skills_required",
             "experience_level",
             "status",
@@ -51,6 +59,7 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
 
     company = CompanyProfileSerializer(read_only=True)
     applications_count = serializers.IntegerField(read_only=True)
+    skills = SkillSerializer(many=True, read_only=True)
 
     class Meta:
         model = JobPost
@@ -65,6 +74,7 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
             "salary_min",
             "salary_max",
             "currency",
+            "skills",
             "skills_required",
             "experience_level",
             "status",
@@ -78,6 +88,7 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
 
 class JobPostCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating a new job post."""
+    skills = serializers.PrimaryKeyRelatedField(many=True, queryset=Skill.objects.all(), required=False)
 
     class Meta:
         model = JobPost
@@ -90,6 +101,7 @@ class JobPostCreateSerializer(serializers.ModelSerializer):
             "salary_min",
             "salary_max",
             "currency",
+            "skills",
             "skills_required",
             "experience_level",
             "status",
@@ -119,6 +131,7 @@ class JobPostCreateSerializer(serializers.ModelSerializer):
 
 class JobPostUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating a job post — all fields optional."""
+    skills = serializers.PrimaryKeyRelatedField(many=True, queryset=Skill.objects.all(), required=False)
 
     class Meta:
         model = JobPost
@@ -131,6 +144,7 @@ class JobPostUpdateSerializer(serializers.ModelSerializer):
             "salary_min",
             "salary_max",
             "currency",
+            "skills",
             "skills_required",
             "experience_level",
             "status",

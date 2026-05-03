@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import RegisterView, LoginView, LogoutView, ProfileView, CookieTokenRefreshView, WsTicketView, PublicProfileView, ChangePasswordView, UpdatePhoneNumberView, GoogleLoginView
+from .views import RegisterView, LoginView, LogoutView, ProfileView, CookieTokenRefreshView, WsTicketView, PublicProfileView, ChangePasswordView, UpdatePhoneNumberView, GoogleLoginView, UserListView, RecruiterContactView
 app_name = 'useraccounts'
 
 urlpatterns = [
@@ -10,6 +10,8 @@ urlpatterns = [
     path('logout/', LogoutView.as_view(), name='logout'),
     path('profile/', ProfileView.as_view(), name='profile'),
     path('profile/<uuid:user_id>/', PublicProfileView.as_view(), name='public-profile'),
+    path('list/', UserListView.as_view(), name='user-list'),
+    path('contact/', RecruiterContactView.as_view(), name='recruiter-contact'),
     path('token/refresh/', CookieTokenRefreshView.as_view(), name='token_refresh'),
     path('ws-ticket/', WsTicketView.as_view(), name='ws-ticket'),
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),

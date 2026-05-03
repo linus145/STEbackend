@@ -1,5 +1,12 @@
 from django.contrib import admin
-from .models import JobPost, JobApplication
+from .models import JobPost, JobApplication, Skill
+
+@admin.register(Skill)
+class SkillAdmin(admin.ModelAdmin):
+    list_display = ("name", "category", "created_at")
+    list_filter = ("category",)
+    search_fields = ("name",)
+
 @admin.register(JobPost)
 class JobPostAdmin(admin.ModelAdmin):
     list_display = ("title", "company", "job_type", "work_mode", "status", "experience_level", "created_at")

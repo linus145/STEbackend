@@ -1,3 +1,4 @@
+from django.db import models
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -20,6 +21,9 @@ from google.auth.transport import requests
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.shortcuts import redirect
+from django.core.mail import send_mail
+from .models import CustomUser
+
 
 
 class RequestResponseMixin:
@@ -467,3 +471,69 @@ class GoogleLoginView(APIView, RequestResponseMixin):
         except Exception as e:
             print(f"DEBUG: Google Login Exception: {str(e)}")
             return redirect(f"{settings.FRONTEND_URL}/login?error=server_error")
+
+class UserListView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, *args, **kwargs):
+        # Exclude Admin and Staff users to show all potential candidates
+        users = CustomUser.objects.exclude(
+            models.Q(role=CustomUser.ROLE_ADMIN) | models.Q(is_staff=True)
+        )
+        serializer = UserSerializer(users, many=True)
+        return self.build_response(
+            "success",
+            "Users fetched successfully.",
+            serializer.data,
+            status.HTTP_200_OK,
+        )
+
+class RecruiterContactView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        target_user_id = request.data.get('target_user_id')
+        message_content = request.data.get('message')
+        send_email = request.data.get('send_email', False)
+
+        if not target_user_id or not message_content:
+            return self.build_response("error", "Target user ID and message are required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_user = CustomUser.objects.get(id=target_user_id)
+        except (CustomUser.DoesNotExist, ValueError):
+            return self.build_response("error", "User not found.", {}, status.HTTP_404_NOT_FOUND)
+
+        # 1. Send Chat Message
+        from chat.models import ChatRoom, Message as ChatMessage
+        from django.db.models import Count
+        
+        # Check if 1-to-1 room already exists between these two users
+        room = ChatRoom.objects.filter(is_group=False, participants=request.user).filter(participants=target_user).first()
+
+        if not room:
+            room = ChatRoom.objects.create(is_group=False)
+            room.participants.add(request.user, target_user)
+        
+        ChatMessage.objects.create(room=room, sender=request.user, text=message_content)
+        room.save() # bump updated_at
+
+        # 2. Send Email
+        if send_email:
+            try:
+                subject = f"Message from {request.user.first_name or 'a Recruiter'} via STE"
+                # Fallback if DEFAULT_FROM_EMAIL is not set
+                from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.in')
+                send_mail(
+                    subject,
+                    message_content,
+                    from_email,
+                    [target_user.email],
+                    fail_silently=False,
+                )
+            except Exception as e:
+                # We still return success for the chat message even if email fails
+                print(f"Email sending failed: {e}")
+
+        return self.build_response("success", "Message sent successfully.", {}, status.HTTP_200_OK)
+

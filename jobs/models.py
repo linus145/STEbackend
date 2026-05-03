@@ -6,6 +6,30 @@ from maincore.basemodel import SoftDeleteModel
 
 
 
+class Skill(models.Model):
+    """
+    A skill that can be associated with a job post.
+    Categorized into IT and Non-IT.
+    """
+    CATEGORY_CHOICES = (
+        ("IT", "IT"),
+        ("NON_IT", "Non-IT"),
+    )
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True, db_index=True)
+    category = models.CharField(max_length=10, choices=CATEGORY_CHOICES, default="IT")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Skill"
+        verbose_name_plural = "Skills"
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.category})"
+
+
 class JobPost(SoftDeleteModel):
     """
     A job listing posted by a company.
@@ -65,7 +89,12 @@ class JobPost(SoftDeleteModel):
         max_digits=12, decimal_places=2, null=True, blank=True
     )
     currency = models.CharField(max_length=10, default="INR")
+    
+    # Updated to ManyToMany
+    skills = models.ManyToManyField(Skill, related_name="job_posts", blank=True)
+    # Keeping for backward compatibility or migration reference if needed
     skills_required = models.JSONField(default=list, blank=True)
+    
     experience_level = models.CharField(
         max_length=20, choices=EXPERIENCE_LEVEL_CHOICES, default="ENTRY"
     )

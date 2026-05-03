@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.generics import get_object_or_404, ListAPIView
 
-from .models import JobPost, JobApplication
+from .models import JobPost, JobApplication, Skill
 from .serializers import (
     JobPostListSerializer,
     JobPostDetailSerializer,
@@ -14,6 +14,7 @@ from .serializers import (
     JobApplicationSerializer,
     JobApplicationCreateSerializer,
     JobApplicationStatusSerializer,
+    SkillSerializer,
 )
 from .permissions import IsCompanyOwner, IsJobOwner
 from .services import JobService
@@ -179,4 +180,20 @@ class MyApplicationsView(ListAPIView, ResponseMixin):
         if status_filter:
             qs = qs.filter(status=status_filter)
         return qs
+
+
+class SkillListView(APIView, ResponseMixin):
+    """
+    GET: List all available skills, optionally filtered by category.
+    """
+    permission_classes = (AllowAny,) # Allow public fetching for dropdowns
+
+    def get(self, request):
+        category = request.query_params.get("category")
+        qs = Skill.objects.all()
+        if category:
+            qs = qs.filter(category=category)
+        
+        serializer = SkillSerializer(qs, many=True)
+        return self.build_response("success", "Skills fetched.", serializer.data)
 
