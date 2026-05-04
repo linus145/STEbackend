@@ -98,6 +98,8 @@ class JobPost(SoftDeleteModel):
     experience_level = models.CharField(
         max_length=20, choices=EXPERIENCE_LEVEL_CHOICES, default="ENTRY"
     )
+    open_positions = models.PositiveIntegerField(default=1)
+    department = models.CharField(max_length=100, blank=True)
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="DRAFT", db_index=True
     )
@@ -105,6 +107,7 @@ class JobPost(SoftDeleteModel):
         max_length=30, choices=HIRING_STATUS_CHOICES, default="ACTIVELY_HIRING"
     )
     deadline = models.DateTimeField(null=True, blank=True)
+    is_ai_generated = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -157,6 +160,10 @@ class JobApplication(SoftDeleteModel):
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="PENDING", db_index=True
     )
+    
+    # AI Analysis Fields
+    ai_score = models.IntegerField(null=True, blank=True, help_text="AI generated fit score (0-100)")
+    ai_analysis = models.TextField(blank=True, help_text="Detailed AI analysis of the candidate fit")
 
     applied_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -169,3 +176,23 @@ class JobApplication(SoftDeleteModel):
 
     def __str__(self):
         return f"{self.applicant.email} → {self.job.title}"
+
+
+class AppliedJob(models.Model):
+    """
+    Historical log of applied jobs storing snapshot data.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job_id = models.CharField(max_length=255, db_index=True)
+    job_name = models.CharField(max_length=255)
+    resume_url = models.URLField(max_length=500)
+    applicant_id = models.CharField(max_length=255, db_index=True)
+    applied_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Applied Job Log"
+        verbose_name_plural = "Applied Job Logs"
+        ordering = ["-applied_at"]
+
+    def __str__(self):
+        return f"{self.job_name} ({self.applicant_id})"

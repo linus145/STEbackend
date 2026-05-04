@@ -44,12 +44,15 @@ class JobPostListSerializer(serializers.ModelSerializer):
             "skills",
             "skills_required",
             "experience_level",
+            "open_positions",
+            "department",
             "status",
             "hiring_status",
             "deadline",
             "applications_count",
             "company_is_genuine",
             "hr_profile",
+            "is_ai_generated",
             "created_at",
         )
 
@@ -77,10 +80,13 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
             "skills",
             "skills_required",
             "experience_level",
+            "open_positions",
+            "department",
             "status",
             "hiring_status",
             "deadline",
             "applications_count",
+            "is_ai_generated",
             "created_at",
             "updated_at",
         )
@@ -104,6 +110,8 @@ class JobPostCreateSerializer(serializers.ModelSerializer):
             "skills",
             "skills_required",
             "experience_level",
+            "open_positions",
+            "department",
             "status",
             "hiring_status",
             "deadline",
@@ -147,6 +155,8 @@ class JobPostUpdateSerializer(serializers.ModelSerializer):
             "skills",
             "skills_required",
             "experience_level",
+            "open_positions",
+            "department",
             "status",
             "hiring_status",
             "deadline",
@@ -198,10 +208,12 @@ class JobApplicationSerializer(serializers.ModelSerializer):
             "resume_url",
             "cover_letter",
             "status",
+            "ai_score",
+            "ai_analysis",
             "applied_at",
             "updated_at",
         )
-        read_only_fields = ("id", "job", "job_title", "applicant", "applied_at", "updated_at")
+        read_only_fields = ("id", "job", "job_title", "applicant", "ai_score", "ai_analysis", "applied_at", "updated_at")
 
 
 class JobApplicationCreateSerializer(serializers.ModelSerializer):

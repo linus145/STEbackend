@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import JobPost, JobApplication, Skill
+from .models import JobPost, JobApplication, Skill, AppliedJob
 
 @admin.register(Skill)
 class SkillAdmin(admin.ModelAdmin):
@@ -23,3 +23,9 @@ class JobApplicationAdmin(admin.ModelAdmin):
     search_fields = ("applicant__email", "job__title")
     readonly_fields = ("id", "applied_at", "updated_at")
     raw_id_fields = ("job", "applicant")
+
+@admin.register(AppliedJob)
+class AppliedJobAdmin(admin.ModelAdmin):
+    list_display = ("job_name", "applicant_id", "applied_at")
+    search_fields = ("job_name", "applicant_id", "job_id")
+    readonly_fields = ("id", "applied_at")

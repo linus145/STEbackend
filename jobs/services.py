@@ -1,6 +1,6 @@
 from django.db import transaction, models
 from django.db.models import Count, Q
-from .models import JobPost, JobApplication
+from .models import JobPost, JobApplication, AppliedJob
 from typing import Dict, Any, List
 
 class JobService:
@@ -60,7 +60,9 @@ class JobService:
             raise ValueError("You cannot apply to your own company's job.")
 
         with transaction.atomic():
+            # Create/Restore application
             existing_app = JobApplication.all_objects.filter(job=job, applicant=user).first()
+            application = None
             if existing_app:
                 if not existing_app.is_deleted:
                     raise ValueError("You have already applied to this job.")
@@ -68,9 +70,19 @@ class JobService:
                 for attr, value in validated_data.items():
                     setattr(existing_app, attr, value)
                 existing_app.save()
-                return existing_app
+                application = existing_app
+            else:
+                application = JobApplication.objects.create(job=job, applicant=user, **validated_data)
             
-            return JobApplication.objects.create(job=job, applicant=user, **validated_data)
+            # Log application snapshot in AppliedJob table
+            AppliedJob.objects.create(
+                job_id=str(job.id),
+                job_name=job.title,
+                resume_url=validated_data.get('resume_url', ''),
+                applicant_id=str(user.id)
+            )
+            
+            return application
 
     @staticmethod
     def get_dashboard_stats(company):

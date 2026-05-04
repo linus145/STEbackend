@@ -94,7 +94,8 @@ INSTALLED_APPS = [
     "subscription",
     "jobs",
     "seo",
-    "publicpages"
+    "publicpages",
+    "AIAgents"
 ]
 
 MIDDLEWARE = [
@@ -128,6 +129,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "maincore.wsgi.application"
 ASGI_APPLICATION = "maincore.asgi.application"
+# NOTE: For AI screening, run with: daphne --http-timeout 300 maincore.asgi:application
+
 
 if DEBUG:
     # Local development: no Redis needed
@@ -341,3 +344,6 @@ else:
     EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@b2linq.in")
+
+# AI & External APIs
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
