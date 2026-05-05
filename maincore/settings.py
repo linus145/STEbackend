@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     "AI",
     "subscription",
     "jobs",
+    "news",
     "seo",
     "publicpages",
     "AIAgents"
