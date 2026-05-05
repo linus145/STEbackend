@@ -63,6 +63,22 @@ class JobService:
             # Create/Restore application
             existing_app = JobApplication.all_objects.filter(job=job, applicant=user).first()
             application = None
+            
+            # If resume_url is not in validated_data, try to get it from profile
+            resume_url = validated_data.get('resume_url')
+            if not resume_url:
+                if hasattr(user, 'founder_profile') and user.founder_profile.resume_url:
+                    resume_url = user.founder_profile.resume_url
+                elif hasattr(user, 'investor_profile') and user.investor_profile.resume_url:
+                    resume_url = user.investor_profile.resume_url
+                elif hasattr(user, 'mentor_profile') and user.mentor_profile.resume_url:
+                    resume_url = user.mentor_profile.resume_url
+            
+            if not resume_url:
+                raise ValueError("No resume found. Please update your profile or provide a resume URL.")
+                
+            validated_data['resume_url'] = resume_url
+
             if existing_app:
                 if not existing_app.is_deleted:
                     raise ValueError("You have already applied to this job.")
@@ -78,7 +94,7 @@ class JobService:
             AppliedJob.objects.create(
                 job_id=str(job.id),
                 job_name=job.title,
-                resume_url=validated_data.get('resume_url', ''),
+                resume_url=resume_url,
                 applicant_id=str(user.id)
             )
             

@@ -5,12 +5,12 @@ from django.utils import timezone
 from maincore.basemodel import SoftDeleteModel
 
 
-
 class Skill(models.Model):
     """
     A skill that can be associated with a job post.
     Categorized into IT and Non-IT.
     """
+
     CATEGORY_CHOICES = (
         ("IT", "IT"),
         ("NON_IT", "Non-IT"),
@@ -68,7 +68,7 @@ class JobPost(SoftDeleteModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(
-        'startups.CompanyProfile',
+        "startups.CompanyProfile",
         on_delete=models.CASCADE,
         related_name="job_posts",
         db_index=True,
@@ -89,12 +89,12 @@ class JobPost(SoftDeleteModel):
         max_digits=12, decimal_places=2, null=True, blank=True
     )
     currency = models.CharField(max_length=10, default="INR")
-    
+
     # Updated to ManyToMany
     skills = models.ManyToManyField(Skill, related_name="job_posts", blank=True)
     # Keeping for backward compatibility or migration reference if needed
     skills_required = models.JSONField(default=list, blank=True)
-    
+
     experience_level = models.CharField(
         max_length=20, choices=EXPERIENCE_LEVEL_CHOICES, default="ENTRY"
     )
@@ -122,7 +122,11 @@ class JobPost(SoftDeleteModel):
 
     @property
     def applications_count(self):
-        return getattr(self, '_applications_count', self.applications.filter(is_deleted=False).count())
+        return getattr(
+            self,
+            "_applications_count",
+            self.applications.filter(is_deleted=False).count(),
+        )
 
     @applications_count.setter
     def applications_count(self, value):
@@ -160,10 +164,14 @@ class JobApplication(SoftDeleteModel):
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="PENDING", db_index=True
     )
-    
+
     # AI Analysis Fields
-    ai_score = models.IntegerField(null=True, blank=True, help_text="AI generated fit score (0-100)")
-    ai_analysis = models.TextField(blank=True, help_text="Detailed AI analysis of the candidate fit")
+    ai_score = models.IntegerField(
+        null=True, blank=True, help_text="AI generated fit score (0-100)"
+    )
+    ai_analysis = models.TextField(
+        blank=True, help_text="Detailed AI analysis of the candidate fit"
+    )
 
     applied_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -182,6 +190,7 @@ class AppliedJob(models.Model):
     """
     Historical log of applied jobs storing snapshot data.
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job_id = models.CharField(max_length=255, db_index=True)
     job_name = models.CharField(max_length=255)

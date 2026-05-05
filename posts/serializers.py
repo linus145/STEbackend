@@ -6,6 +6,7 @@ class PostSerializer(serializers.ModelSerializer):
     author_email = serializers.EmailField(source='author.email', read_only=True)
     author_first_name = serializers.CharField(source='author.first_name', read_only=True)
     author_role = serializers.CharField(source='author.role', read_only=True)
+    author_headline = serializers.SerializerMethodField()
     author_image_url = serializers.SerializerMethodField()
     author_linkedin_url = serializers.SerializerMethodField()
     
@@ -18,11 +19,21 @@ class PostSerializer(serializers.ModelSerializer):
         model = Post
         fields = (
             'id', 'author_id', 'author_email', 'author_first_name', 'author_role', 
-            'author_image_url', 'author_linkedin_url',
+            'author_headline', 'author_image_url', 'author_linkedin_url',
             'content', 'media_url', 'visibility', 'likes_count', 'comments_count', 
             'user_has_liked', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
+
+    def get_author_headline(self, obj):
+        user = obj.author
+        if hasattr(user, 'founder_profile') and user.founder_profile.headline:
+            return user.founder_profile.headline
+        if hasattr(user, 'investor_profile') and user.investor_profile.headline:
+            return user.investor_profile.headline
+        if hasattr(user, 'mentor_profile') and user.mentor_profile.headline:
+            return user.mentor_profile.headline
+        return user.role.capitalize() if user.role else "Member"
 
     def get_author_image_url(self, obj):
         user = obj.author

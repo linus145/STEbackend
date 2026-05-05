@@ -25,7 +25,7 @@ class UserService:
             )
             
             # Create profile based on role
-            if user.role == User.ROLE_FOUNDER:
+            if user.role in [User.ROLE_FOUNDER, User.ROLE_CO_FOUNDER]:
                 Founder.objects.create(user=user)
             elif user.role == User.ROLE_INVESTOR:
                 Investor.objects.create(user=user)
@@ -99,5 +99,8 @@ class UserService:
                         is_verified=True
                     )
                     # Create default profile
-                    Founder.objects.create(user=user)
+                    if user.role in [User.ROLE_FOUNDER, User.ROLE_CO_FOUNDER]:
+                        Founder.objects.create(user=user)
+                    elif user.role == User.ROLE_INVESTOR:
+                        Investor.objects.create(user=user)
         return user

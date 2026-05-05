@@ -165,7 +165,7 @@ Provide a deep, multi-line analysis for each section. Ensure the full ANALYSIS i
                             model=model_name,
                             contents=[pdf_part, prompt],
                             config=types.GenerateContentConfig(
-                                max_output_tokens=1800,
+                                max_output_tokens=8000,
                                 temperature=0.3,
                             ),
                         )
@@ -224,8 +224,8 @@ Provide a deep, multi-line analysis for each section. Ensure the full ANALYSIS i
         if not analysis:
             analysis = content  # Use full response as fallback
 
-        # Hard-cap at 2500 chars for detailed display
-        if len(analysis) > 2500:
-            analysis = analysis[:2497] + "..."
+        # Hard-cap at 1000 chars for detailed display
+        if len(analysis) > 20000:
+            analysis = analysis[:19997] + "..."
 
         return score, analysis

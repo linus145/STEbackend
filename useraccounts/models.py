@@ -9,14 +9,28 @@ from maincore.basemodel import SoftDeleteModel
 class CustomUser(AbstractBaseUser, PermissionsMixin, SoftDeleteModel):
     ROLE_ADMIN = "ADMIN"
     ROLE_FOUNDER = "FOUNDER"
+    ROLE_CO_FOUNDER = "CO_FOUNDER"
     ROLE_INVESTOR = "INVESTOR"
     ROLE_MENTOR = "MENTOR"
+    ROLE_SALES = "SALES"
+    ROLE_MARKETING = "MARKETING"
+    ROLE_ENGINEER = "ENGINEER"
+    ROLE_PRODUCT = "PRODUCT"
+    ROLE_DESIGN = "DESIGN"
+    ROLE_OPERATIONS = "OPERATIONS"
 
     ROLE_CHOICES = (
         (ROLE_ADMIN, "Admin"),
         (ROLE_FOUNDER, "Founder"),
+        (ROLE_CO_FOUNDER, "Co-Founder"),
         (ROLE_INVESTOR, "Investor"),
         (ROLE_MENTOR, "Mentor"),
+        (ROLE_SALES, "Sales"),
+        (ROLE_MARKETING, "Marketing"),
+        (ROLE_ENGINEER, "Engineer"),
+        (ROLE_PRODUCT, "Product Manager"),
+        (ROLE_DESIGN, "Designer"),
+        (ROLE_OPERATIONS, "Operations"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

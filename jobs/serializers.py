@@ -179,17 +179,27 @@ class ApplicantMiniSerializer(serializers.ModelSerializer):
     """Minimal user info for displaying applicants to the recruiter."""
 
     profile_image_url = serializers.SerializerMethodField()
+    headline = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "first_name", "last_name", "email", "profile_image_url")
+        fields = ("id", "first_name", "last_name", "email", "profile_image_url", "headline")
 
     def get_profile_image_url(self, obj):
         if hasattr(obj, "founder_profile") and obj.founder_profile:
             return obj.founder_profile.profile_image_url
-        if hasattr(obj, "investor_profile") and obj.investor_profile:
-            return obj.investor_profile.profile_image_url
+        if hasattr(obj, "mentor_profile") and obj.mentor_profile:
+            return obj.mentor_profile.profile_image_url
         return ""
+
+    def get_headline(self, obj):
+        if hasattr(obj, 'founder_profile') and obj.founder_profile.headline:
+            return obj.founder_profile.headline
+        if hasattr(obj, 'investor_profile') and obj.investor_profile.headline:
+            return obj.investor_profile.headline
+        if hasattr(obj, 'mentor_profile') and obj.mentor_profile.headline:
+            return obj.mentor_profile.headline
+        return obj.role.capitalize() if obj.role else "Member"
 
 
 class JobApplicationSerializer(serializers.ModelSerializer):
@@ -222,6 +232,9 @@ class JobApplicationCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobApplication
         fields = ("resume_url", "cover_letter")
+        extra_kwargs = {
+            'resume_url': {'required': False, 'allow_blank': True}
+        }
 
 
 class JobApplicationStatusSerializer(serializers.ModelSerializer):

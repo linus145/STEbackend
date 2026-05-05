@@ -12,7 +12,8 @@ class FounderSerializer(serializers.ModelSerializer):
             'id', 'user_email', 'first_name', 'last_name', 
             'headline', 'bio', 'location', 'profile_image_url', 'banner_image_url',
             'experience_years', 'primary_industry', 
-            'skills', 'linkedin_url', 'portfolio_url', 
+            'skills', 'linkedin_url', 'portfolio_url', 'resume_url',
+            'education', 'experience',
             'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
@@ -23,5 +24,6 @@ class FounderUpdateSerializer(serializers.ModelSerializer):
         fields = (
             'headline', 'bio', 'location', 'profile_image_url', 'banner_image_url',
             'experience_years', 'primary_industry', 
-            'skills', 'linkedin_url', 'portfolio_url'
+            'skills', 'linkedin_url', 'portfolio_url', 'resume_url',
+            'education', 'experience'
         )

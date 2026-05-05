@@ -284,6 +284,9 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         job = get_object_or_404(JobPost, id=job_id)
         self.check_object_permissions(request, job)
 
+        # Import AI models here to avoid circular imports
+        from AI.models import AIScreeningReport
+
         # 1. Validate AI Configuration
         from django.conf import settings as django_settings
 
@@ -340,7 +343,8 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                     return app, None, str(e)
 
             if apps_with_resume:
-                with ThreadPoolExecutor(max_workers=5) as executor:
+                # Increase max_workers to 15 to handle large volumes (e.g., 200+) faster
+                with ThreadPoolExecutor(max_workers=15) as executor:
                     futures = {
                         executor.submit(screen_one, app): app for app in apps_with_resume
                     }
@@ -407,6 +411,19 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                 msg += f" {len(errors)} resume(s) failed."
         else:
             msg = "All candidates screened successfully. No pending resumes left to analyze."
+
+        # Save to History
+        AIScreeningReport.objects.create(
+            job_id=job.id,
+            job_title=job.title,
+            recruiter=request.user,
+            results={
+                "processed_count": processed_count,
+                "total_applicants": total_scored,
+                "top_candidates": results_data,
+                "openings": openings,
+            }
+        )
 
         return self.build_response(
             "success",

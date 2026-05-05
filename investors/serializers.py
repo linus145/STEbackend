@@ -13,7 +13,8 @@ class InvestorSerializer(serializers.ModelSerializer):
             'headline', 'bio', 'location', 'profile_image_url', 'banner_image_url',
             'firm_name', 'preferred_stages', 'preferred_industries',
             'minimum_investment_range', 'maximum_investment_range',
-            'linkedin_url', 'portfolio_url', 'created_at', 'updated_at'
+            'linkedin_url', 'portfolio_url', 'resume_url',
+            'education', 'experience', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'created_at', 'updated_at')
 
@@ -24,5 +25,6 @@ class InvestorUpdateSerializer(serializers.ModelSerializer):
             'headline', 'bio', 'location', 'profile_image_url', 'banner_image_url',
             'firm_name', 'preferred_stages', 'preferred_industries',
             'minimum_investment_range', 'maximum_investment_range',
-            'linkedin_url', 'portfolio_url'
+            'linkedin_url', 'portfolio_url', 'resume_url',
+            'education', 'experience'
         )

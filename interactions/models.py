@@ -128,6 +128,11 @@ class MentorProfile(SoftDeleteModel):
     location = models.CharField(max_length=100, blank=True)
     profile_image_url = models.URLField(max_length=500, blank=True)
     expertise = models.JSONField(default=list, blank=True)
+    resume_url = models.URLField(max_length=500, blank=True, help_text="Link to the user's resume PDF")
+
+    # Career Details
+    experience = models.JSONField(default=list, blank=True, help_text="List of work experiences")
+    education = models.JSONField(default=list, blank=True, help_text="List of educational qualifications including CGPA")
     
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

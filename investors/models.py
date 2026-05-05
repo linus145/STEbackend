@@ -23,6 +23,11 @@ class Investor(SoftDeleteModel):
     maximum_investment_range = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
     linkedin_url = models.URLField(max_length=255, blank=True)
     portfolio_url = models.URLField(max_length=255, blank=True)
+    resume_url = models.URLField(max_length=500, blank=True, help_text="Link to the user's resume PDF")
+
+    # Career Details
+    experience = models.JSONField(default=list, blank=True, help_text="List of work experiences")
+    education = models.JSONField(default=list, blank=True, help_text="List of educational qualifications including CGPA")
     
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

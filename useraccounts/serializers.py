@@ -20,7 +20,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_profile(self, obj):
         from interactions.serializers import MentorProfileSerializer
-        if obj.role == User.ROLE_FOUNDER:
+        if obj.role in [User.ROLE_FOUNDER, User.ROLE_CO_FOUNDER]:
             if hasattr(obj, 'founder_profile'):
                 return FounderSerializer(obj.founder_profile).data
         elif obj.role == User.ROLE_INVESTOR:
