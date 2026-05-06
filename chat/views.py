@@ -24,7 +24,8 @@ class ChatRoomListView(generics.ListAPIView):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        return ChatService.get_user_rooms(self.request.user)
+        room_type = self.request.query_params.get('type', None)
+        return ChatService.get_user_rooms(self.request.user, room_type=room_type)
 
 class Initialize1to1RoomView(APIView):
     """
@@ -59,6 +60,49 @@ class Initialize1to1RoomView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
         except ValueError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DirectMessageRoomView(APIView):
+    """
+    Creates or gets a direct 1-to-1 chat room between any two users
+    WITHOUT requiring a connection. Used for job-related messaging
+    (e.g., user messaging the job poster, recruiter messaging talent).
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        target_user_id = request.data.get('target_user_id')
+        message_text = request.data.get('message', '')
+
+        if not target_user_id:
+            return Response({'error': 'target_user_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            target_user = User.objects.get(id=target_user_id)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.user == target_user:
+            return Response({'error': 'Cannot message yourself.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from chat.models import ChatRoom, Message as ChatMessage
+
+        # Find or create a direct room (tagged as 'direct' type)
+        room = ChatRoom.objects.filter(
+            is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT, participants=request.user
+        ).filter(participants=target_user).filter(is_active=True).first()
+
+        if not room:
+            room = ChatRoom.objects.create(is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT)
+            room.participants.add(request.user, target_user)
+
+        # If a message was provided, send it immediately
+        if message_text.strip():
+            ChatMessage.objects.create(room=room, sender=request.user, text=message_text.strip())
+            room.save()  # bump updated_at
+
+        serializer = ChatRoomSerializer(room)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class MessageHistoryView(generics.ListAPIView):
     """

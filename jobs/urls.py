@@ -24,4 +24,9 @@ urlpatterns = [
 
     # ─── Skills ──────────────────────────────────────────────────
     path("skills/", views.SkillListView.as_view(), name="skill-list"),
+    
+    # ─── Talent Pipeline ────────────────────────────────────────
+    path("talent-pipeline/", views.TalentPipelineListView.as_view(), name="talent-pipeline-list"),
+    path("talent-pipeline/save/", views.SaveToPipelineView.as_view(), name="save-to-pipeline"),
+    path("talent-pipeline/<uuid:entry_id>/", views.TalentPipelineDetailView.as_view(), name="talent-pipeline-detail"),
 ]

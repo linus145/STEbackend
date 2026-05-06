@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import JobPost, JobApplication, Skill, AppliedJob
+from .models import JobPost, JobApplication, Skill, AppliedJob, TalentPipeline
 
 @admin.register(Skill)
 class SkillAdmin(admin.ModelAdmin):
@@ -29,3 +29,11 @@ class AppliedJobAdmin(admin.ModelAdmin):
     list_display = ("job_name", "applicant_id", "applied_at")
     search_fields = ("job_name", "applicant_id", "job_id")
     readonly_fields = ("id", "applied_at")
+
+@admin.register(TalentPipeline)
+class TalentPipelineAdmin(admin.ModelAdmin):
+    list_display = ("talent", "company", "status", "added_at", "is_deleted")
+    list_filter = ("status", "is_deleted", "added_at")
+    search_fields = ("talent__email", "talent__first_name", "talent__last_name", "company__company_name")
+    readonly_fields = ("id", "added_at")
+    raw_id_fields = ("company", "talent")

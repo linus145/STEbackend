@@ -10,20 +10,36 @@ logger = logging.getLogger(__name__)
 
 class ChatService:
     @staticmethod
-    def get_user_rooms(user: User):
+    def get_user_rooms(user: User, room_type: str = None):
         """
         Retrieves all active chat rooms a user is part of.
-        Strictly enforces that 1-to-1 rooms must have an ACCEPTED connection.
+        Filters:
+          - 'connection': only connection-based rooms
+          - 'direct': only direct/HR rooms
+          - 'personal': connection rooms + direct rooms ONLY if user has no company
+                        (company owners see direct rooms in recruiter dashboard instead)
+          - None: all rooms
         """
         from interactions.models import Connection
         
-        return ChatRoom.objects.filter(
+        qs = ChatRoom.objects.filter(
             participants=user,
             is_active=True
         ).filter(
             models.Q(is_group=True) | 
-            models.Q(connection__status=Connection.STATUS_ACCEPTED)
-        ).prefetch_related(
+            models.Q(connection__status=Connection.STATUS_ACCEPTED) |
+            models.Q(connection__isnull=True)
+        )
+
+        if room_type == 'personal':
+            # If user owns a company, exclude direct/HR rooms (they go to recruiter dashboard)
+            has_company = hasattr(user, 'company_profile') and user.company_profile is not None
+            if has_company:
+                qs = qs.exclude(room_type=ChatRoom.ROOM_TYPE_DIRECT)
+        elif room_type:
+            qs = qs.filter(room_type=room_type)
+
+        return qs.prefetch_related(
             'participants',
             Prefetch('messages', queryset=Message.objects.order_by('-created_at'))
         ).order_by('-updated_at')
@@ -56,7 +72,9 @@ class ChatService:
 
         # If no active room exists for this connection, create a NEW one
         with transaction.atomic():
-            room = ChatRoom.objects.create(connection=connection, is_group=False)
+            room = ChatRoom.objects.create(
+                connection=connection, is_group=False, room_type=ChatRoom.ROOM_TYPE_CONNECTION
+            )
             room.participants.add(user1, user2)
         return room
 

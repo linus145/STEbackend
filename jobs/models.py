@@ -205,3 +205,44 @@ class AppliedJob(models.Model):
 
     def __str__(self):
         return f"{self.job_name} ({self.applicant_id})"
+
+
+class TalentPipeline(SoftDeleteModel):
+    """
+    A talent saved by a company for future consideration or active recruitment tracking.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(
+        "startups.CompanyProfile",
+        on_delete=models.CASCADE,
+        related_name="talent_pipeline",
+        db_index=True,
+    )
+    talent = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="saved_to_pipelines",
+        db_index=True,
+    )
+    STATUS_CHOICES = (
+        ("LEAD", "Lead"),
+        ("CONTACTED", "Contacted"),
+        ("REPLIED", "Replied"),
+        ("PHONE_SCREEN", "Phone Screen (Hiring Manager)"),
+        ("FASE_FINAL", "Fase Final"),
+        ("OFFER_EXTENDED", "Offer Extended"),
+        ("OFFER_ACCEPTED", "Offer Accepted"),
+        ("OFFER_REJECTED", "Offer Rejected"),
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="LEAD")
+    added_at = models.DateTimeField(default=timezone.now)
+    notes = models.TextField(blank=True, help_text="Recruiter notes about the talent")
+
+    class Meta:
+        verbose_name = "Talent Pipeline Entry"
+        verbose_name_plural = "Talent Pipeline Entries"
+        unique_together = ("company", "talent")
+        ordering = ["-added_at"]
+
+    def __str__(self):
+        return f"{self.talent.email} in {self.company.company_name} Pipeline"

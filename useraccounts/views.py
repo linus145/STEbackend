@@ -508,11 +508,13 @@ class RecruiterContactView(APIView, RequestResponseMixin):
         from chat.models import ChatRoom, Message as ChatMessage
         from django.db.models import Count
         
-        # Check if 1-to-1 room already exists between these two users
-        room = ChatRoom.objects.filter(is_group=False, participants=request.user).filter(participants=target_user).first()
+        # Check if a direct-type 1-to-1 room already exists between these two users
+        room = ChatRoom.objects.filter(
+            is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT, participants=request.user
+        ).filter(participants=target_user).first()
 
         if not room:
-            room = ChatRoom.objects.create(is_group=False)
+            room = ChatRoom.objects.create(is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT)
             room.participants.add(request.user, target_user)
         
         ChatMessage.objects.create(room=room, sender=request.user, text=message_content)

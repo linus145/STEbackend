@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.generics import get_object_or_404, ListAPIView
 
-from .models import JobPost, JobApplication, Skill
+from .models import JobPost, JobApplication, Skill, TalentPipeline
 from .serializers import (
     JobPostListSerializer,
     JobPostDetailSerializer,
@@ -15,6 +15,7 @@ from .serializers import (
     JobApplicationCreateSerializer,
     JobApplicationStatusSerializer,
     SkillSerializer,
+    TalentPipelineSerializer,
 )
 from .permissions import IsCompanyOwner, IsJobOwner
 from .services import JobService
@@ -436,3 +437,95 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                 "errors": errors if errors else [],
             },
         )
+
+
+# ─── Talent Pipeline Views ──────────────────────────────────────────
+
+class SaveToPipelineView(APIView, ResponseMixin):
+    """
+    POST: Save a talent (user) to the recruiter's company pipeline.
+    """
+    permission_classes = (IsAuthenticated, IsCompanyOwner)
+
+    def post(self, request):
+        talent_id = request.data.get("talent_id")
+        if not talent_id:
+            return self.build_response("error", "Talent ID is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        talent = get_object_or_404(User, id=talent_id)
+
+        pipeline_entry = TalentPipeline.all_objects.filter(
+            company=request.user.company_profile,
+            talent=talent
+        ).first()
+
+        if pipeline_entry:
+            if pipeline_entry.is_deleted:
+                pipeline_entry.restore()
+                pipeline_entry.status = "LEAD"
+                if request.data.get("notes"):
+                    pipeline_entry.notes = request.data.get("notes")
+                pipeline_entry.save()
+            else:
+                return self.build_response("error", "Talent is already in your pipeline.", {}, status.HTTP_400_BAD_REQUEST)
+        else:
+            pipeline_entry = TalentPipeline.objects.create(
+                company=request.user.company_profile,
+                talent=talent,
+                notes=request.data.get("notes", "")
+            )
+
+        return self.build_response(
+            "success", 
+            "Talent saved to pipeline.", 
+            TalentPipelineSerializer(pipeline_entry).data,
+            status.HTTP_201_CREATED
+        )
+
+
+class TalentPipelineListView(ListAPIView, ResponseMixin):
+    """
+    GET: List all talents in the recruiter's company pipeline.
+    """
+    permission_classes = (IsAuthenticated, IsCompanyOwner)
+    serializer_class = TalentPipelineSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        return TalentPipeline.objects.filter(
+            company=self.request.user.company_profile,
+            is_deleted=False
+        ).select_related("talent")
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return self.build_response("success", "Pipeline talents fetched.", serializer.data)
+
+
+class TalentPipelineDetailView(APIView, ResponseMixin):
+    """
+    PATCH: Update a talent pipeline entry (status/notes).
+    DELETE: Remove a talent from the pipeline.
+    """
+    permission_classes = (IsAuthenticated, IsCompanyOwner)
+
+    def patch(self, request, entry_id):
+        entry = get_object_or_404(TalentPipeline, id=entry_id, company=request.user.company_profile)
+        serializer = TalentPipelineSerializer(entry, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return self.build_response("success", "Pipeline updated.", serializer.data)
+        return self.build_response("error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, entry_id):
+        entry = get_object_or_404(TalentPipeline, id=entry_id, company=request.user.company_profile)
+        entry.delete()
+        return self.build_response("success", "Removed from pipeline.", {}, status.HTTP_204_NO_CONTENT)

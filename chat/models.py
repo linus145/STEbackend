@@ -5,9 +5,23 @@ from django.utils import timezone
 from maincore.basemodel import SoftDeleteModel
 
 class ChatRoom(SoftDeleteModel):
+    ROOM_TYPE_CONNECTION = 'connection'
+    ROOM_TYPE_DIRECT = 'direct'
+    ROOM_TYPE_CHOICES = (
+        (ROOM_TYPE_CONNECTION, 'Connection Chat'),
+        (ROOM_TYPE_DIRECT, 'Direct / HR Chat'),
+    )
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, blank=True, null=True, help_text="Used for group chats")
     is_group = models.BooleanField(default=False)
+    room_type = models.CharField(
+        max_length=20,
+        choices=ROOM_TYPE_CHOICES,
+        default=ROOM_TYPE_CONNECTION,
+        db_index=True,
+        help_text="'connection' for network chats, 'direct' for HR/recruiter chats"
+    )
     participants = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         related_name='chat_rooms',

@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from startups.serializers import CompanyProfileSerializer, CompanyHRProfileSerializer
-from .models import JobPost, JobApplication, Skill
+from .models import JobPost, JobApplication, Skill, TalentPipeline
+
 
 class SkillSerializer(serializers.ModelSerializer):
     """Serializer for the Skill model."""
@@ -22,6 +23,7 @@ class JobPostListSerializer(serializers.ModelSerializer):
     company_logo = serializers.URLField(source="company.logo_url", read_only=True)
     company_id = serializers.UUIDField(source="company.id", read_only=True)
     company_is_genuine = serializers.BooleanField(source="company.is_genuine", read_only=True)
+    owner_user_id = serializers.UUIDField(source="company.owner_id", read_only=True)
     hr_profile = CompanyHRProfileSerializer(source="company.hr_profile", read_only=True)
     applications_count = serializers.IntegerField(read_only=True)
     skills = SkillSerializer(many=True, read_only=True)
@@ -51,6 +53,7 @@ class JobPostListSerializer(serializers.ModelSerializer):
             "deadline",
             "applications_count",
             "company_is_genuine",
+            "owner_user_id",
             "hr_profile",
             "is_ai_generated",
             "created_at",
@@ -243,3 +246,14 @@ class JobApplicationStatusSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobApplication
         fields = ("status",)
+
+
+class TalentPipelineSerializer(serializers.ModelSerializer):
+    """Serializer for Talent Pipeline entries."""
+
+    talent = ApplicantMiniSerializer(read_only=True)
+
+    class Meta:
+        model = TalentPipeline
+        fields = ("id", "talent", "added_at", "status", "notes")
+        read_only_fields = ("id", "added_at")
