@@ -12,7 +12,7 @@ class NewsSerializer(serializers.ModelSerializer):
         model = News
         fields = (
             'id', 'author_id', 'author_email', 'author_first_name', 'author_last_name',
-            'author_image_url', 'title', 'content', 'media_url', 
+            'author_image_url', 'title', 'short_title', 'content', 'media_url', 
             'is_popular', 'is_trending', 'is_top_news', 
             'created_at', 'updated_at'
         )
@@ -29,7 +29,7 @@ class NewsSerializer(serializers.ModelSerializer):
 class NewsCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = News
-        fields = ('title', 'content', 'media_url')
+        fields = ('title', 'short_title', 'content', 'media_url')
 
     def validate_title(self, value):
         if not value.strip():

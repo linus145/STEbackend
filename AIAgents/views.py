@@ -49,6 +49,27 @@ class AgentTaskExecuteView(APIView):
                 "message": "Interview scheduling emails sent via AI Agent.",
                 "details": details
             })
+        elif task_type == "talent_search":
+            query = payload.get("query", "")
+            try:
+                results = AIAgentService.execute_talent_search(query, request.user)
+                return Response({
+                    "status": "success",
+                    "message": "AI successfully analyzed your query and found matching talent.",
+                    "details": results
+                })
+            except Exception as e:
+                traceback.print_exc()
+                return Response({
+                    "status": "error",
+                    "message": f"Agent failed to execute talent search: {str(e)}"
+                }, status=500)
+        elif task_type == "get_search_history":
+            history = AIAgentService.get_talent_search_history(request.user)
+            return Response({
+                "status": "success",
+                "details": history
+            })
         else:
             return Response({
                 "status": "error",
