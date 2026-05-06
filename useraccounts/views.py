@@ -25,7 +25,6 @@ from django.core.mail import send_mail
 from .models import CustomUser
 
 
-
 class RequestResponseMixin:
     """Helper to maintain standardized structured JSON output globally"""
 
@@ -472,6 +471,7 @@ class GoogleLoginView(APIView, RequestResponseMixin):
             print(f"DEBUG: Google Login Exception: {str(e)}")
             return redirect(f"{settings.FRONTEND_URL}/login?error=server_error")
 
+
 class UserListView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
@@ -488,44 +488,64 @@ class UserListView(APIView, RequestResponseMixin):
             status.HTTP_200_OK,
         )
 
+
 class RecruiterContactView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
-        target_user_id = request.data.get('target_user_id')
-        message_content = request.data.get('message')
-        send_email = request.data.get('send_email', False)
+        target_user_id = request.data.get("target_user_id")
+        message_content = request.data.get("message")
+        send_email = request.data.get("send_email", False)
 
         if not target_user_id or not message_content:
-            return self.build_response("error", "Target user ID and message are required.", {}, status.HTTP_400_BAD_REQUEST)
+            return self.build_response(
+                "error",
+                "Target user ID and message are required.",
+                {},
+                status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             target_user = CustomUser.objects.get(id=target_user_id)
         except (CustomUser.DoesNotExist, ValueError):
-            return self.build_response("error", "User not found.", {}, status.HTTP_404_NOT_FOUND)
+            return self.build_response(
+                "error", "User not found.", {}, status.HTTP_404_NOT_FOUND
+            )
 
         # 1. Send Chat Message
         from chat.models import ChatRoom, Message as ChatMessage
         from django.db.models import Count
-        
+
         # Check if a direct-type 1-to-1 room already exists between these two users
-        room = ChatRoom.objects.filter(
-            is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT, participants=request.user
-        ).filter(participants=target_user).first()
+        room = (
+            ChatRoom.objects.filter(
+                is_group=False,
+                room_type=ChatRoom.ROOM_TYPE_DIRECT,
+                participants=request.user,
+            )
+            .filter(participants=target_user)
+            .first()
+        )
 
         if not room:
-            room = ChatRoom.objects.create(is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT)
+            room = ChatRoom.objects.create(
+                is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT
+            )
             room.participants.add(request.user, target_user)
-        
+
         ChatMessage.objects.create(room=room, sender=request.user, text=message_content)
-        room.save() # bump updated_at
+        room.save()  # bump updated_at
 
         # 2. Send Email
         if send_email:
             try:
-                subject = f"Message from {request.user.first_name or 'a Recruiter'} via STE"
+                subject = (
+                    f"Message from {request.user.first_name or 'a Recruiter'} via STE"
+                )
                 # Fallback if DEFAULT_FROM_EMAIL is not set
-                from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.in')
+                from_email = getattr(
+                    settings, "DEFAULT_FROM_EMAIL", "noreply@b2linq.in"
+                )
                 send_mail(
                     subject,
                     message_content,
@@ -537,5 +557,64 @@ class RecruiterContactView(APIView, RequestResponseMixin):
                 # We still return success for the chat message even if email fails
                 print(f"Email sending failed: {e}")
 
-        return self.build_response("success", "Message sent successfully.", {}, status.HTTP_200_OK)
+        return self.build_response(
+            "success", "Message sent successfully.", {}, status.HTTP_200_OK
+        )
+
+
+class RecruiterBulkContactView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        target_user_ids = request.data.get("target_user_ids", [])
+        message_content = request.data.get("message")
+
+        if not target_user_ids or not isinstance(target_user_ids, list) or not message_content:
+            return self.build_response(
+                "error",
+                "Target user IDs (list) and message are required.",
+                {},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        from chat.models import ChatRoom, Message as ChatMessage
+        
+        success_count = 0
+        failed_count = 0
+
+        for target_user_id in target_user_ids:
+            try:
+                target_user = CustomUser.objects.get(id=target_user_id)
+            except (CustomUser.DoesNotExist, ValueError):
+                failed_count += 1
+                continue
+
+            # 1. Send Chat Message
+            room = (
+                ChatRoom.objects.filter(
+                    is_group=False,
+                    room_type=ChatRoom.ROOM_TYPE_DIRECT,
+                    participants=request.user,
+                )
+                .filter(participants=target_user)
+                .first()
+            )
+
+            if not room:
+                room = ChatRoom.objects.create(
+                    is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT
+                )
+                room.participants.add(request.user, target_user)
+
+            ChatMessage.objects.create(room=room, sender=request.user, text=message_content)
+            room.save()  # bump updated_at
+            
+            success_count += 1
+
+        return self.build_response(
+            "success",
+            f"Messages sent successfully. Success: {success_count}, Failed: {failed_count}",
+            {},
+            status.HTTP_200_OK
+        )
 
