@@ -14,6 +14,8 @@ from .views import (
     UserListView,
     RecruiterContactView,
     RecruiterBulkContactView,
+    RequestOTPView,
+    VerifyOTPView,
 )
 
 app_name = "useraccounts"
@@ -32,4 +34,6 @@ urlpatterns = [
     path("ws-ticket/", WsTicketView.as_view(), name="ws-ticket"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),
     path("update-mobile/", UpdatePhoneNumberView.as_view(), name="update-mobile"),
+    path("request-otp/", RequestOTPView.as_view(), name="request-otp"),
+    path("verify-otp/", VerifyOTPView.as_view(), name="verify-otp"),
 ]

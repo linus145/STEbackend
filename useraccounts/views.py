@@ -88,16 +88,13 @@ class RegisterView(APIView, RequestResponseMixin):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
             user = UserService.create_user(serializer.validated_data)
-            tokens = UserService.generate_tokens(user)
             user_data = UserSerializer(user).data
-            response = self.build_response(
+            return self.build_response(
                 status_msg="success",
-                message="User registered successfully.",
+                message="User registered successfully. Please verify your email.",
                 data={"user": user_data},
                 status_code=status.HTTP_201_CREATED,
             )
-            _set_auth_cookies(response, tokens["access"], tokens["refresh"])
-            return response
         return self.build_response(
             "error", "Validation failed", serializer.errors, status.HTTP_400_BAD_REQUEST
         )
@@ -113,6 +110,13 @@ class LoginView(APIView, RequestResponseMixin):
             password = serializer.validated_data["password"]
             user = UserService.authenticate_user(email, password)
             if user:
+                if not user.is_verified:
+                    return self.build_response(
+                        "error", 
+                        "Email not verified. Please verify your email using OTP.", 
+                        {"email": user.email, "is_verified": False}, 
+                        status.HTTP_403_FORBIDDEN
+                    )
                 tokens = UserService.generate_tokens(user)
                 response = self.build_response(
                     status_msg="success",
@@ -617,4 +621,53 @@ class RecruiterBulkContactView(APIView, RequestResponseMixin):
             {},
             status.HTTP_200_OK
         )
+
+
+class RequestOTPView(APIView, RequestResponseMixin):
+    permission_classes = (AllowAny,)
+
+    def post(self, request, *args, **kwargs):
+        from .email_service import EmailService
+        email = request.data.get("email")
+        if not email:
+            return self.build_response("error", "Email is required.", {}, status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            user = CustomUser.objects.get(email=email)
+            if EmailService.send_otp_email(user):
+                return self.build_response("success", "OTP sent to your email.", {}, status.HTTP_200_OK)
+            return self.build_response("error", "Failed to send email. Please try again later.", {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except CustomUser.DoesNotExist:
+            return self.build_response("error", "User with this email does not exist.", {}, status.HTTP_404_NOT_FOUND)
+
+
+class VerifyOTPView(APIView, RequestResponseMixin):
+    permission_classes = (AllowAny,)
+
+    def post(self, request, *args, **kwargs):
+        from .email_service import EmailService
+        email = request.data.get("email")
+        otp = request.data.get("otp")
+        
+        if not email or not otp:
+            return self.build_response("error", "Email and OTP are required.", {}, status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            user = CustomUser.objects.get(email=email)
+            success, message = EmailService.verify_otp(user, otp)
+            
+            if success:
+                tokens = UserService.generate_tokens(user)
+                response = self.build_response(
+                    status_msg="success",
+                    message="Verification successful.",
+                    data={"user": UserSerializer(user).data},
+                    status_code=status.HTTP_200_OK,
+                )
+                _set_auth_cookies(response, tokens["access"], tokens["refresh"])
+                return response
+            return self.build_response("error", message, {}, status.HTTP_400_BAD_REQUEST)
+        except CustomUser.DoesNotExist:
+            return self.build_response("error", "User not found.", {}, status.HTTP_404_NOT_FOUND)
+
 

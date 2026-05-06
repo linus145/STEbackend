@@ -45,6 +45,8 @@ class CustomUser(AbstractBaseUser, PermissionsMixin, SoftDeleteModel):
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
+    otp = models.CharField(max_length=6, blank=True, null=True)
+    otp_created_at = models.DateTimeField(blank=True, null=True)
     google_id = models.CharField(max_length=255, unique=True, blank=True, null=True)
 
     # LinkedIn-Style Premium Fields
