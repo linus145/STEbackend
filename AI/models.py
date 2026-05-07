@@ -15,6 +15,7 @@ class AIScreeningReport(models.Model):
         related_name="ai_screening_reports"
     )
     results = models.JSONField(help_text="Detailed screening results including candidate scores")
+    is_deleted = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

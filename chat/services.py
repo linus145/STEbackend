@@ -29,7 +29,7 @@ class ChatService:
             models.Q(is_group=True) | 
             models.Q(connection__status=Connection.STATUS_ACCEPTED) |
             models.Q(connection__isnull=True)
-        )
+        ).distinct()
 
         if room_type == 'personal':
             # If user owns a company, exclude direct/HR rooms (they go to recruiter dashboard)

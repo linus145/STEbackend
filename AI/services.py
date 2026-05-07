@@ -1,21 +1,33 @@
-import requests
+import json
+import logging
 import re
 import time
-import logging
 
+import requests
+from django.conf import settings
 from google import genai
 from google.genai import types
-from django.conf import settings
 
 logger = logging.getLogger("ai.service")
 
 # Model pipeline: (model_id, max_retries)
-# Primary: gemini-2.5-flash (more capable, handles complex/large PDFs)
-# Fallback: gemini-2.5-flash-lite (faster, lighter)
+# Optimized for SPEED on free tier:
+# Primary: gemini-2.5-flash-lite — fastest, highest free-tier limits
+# Fallback: gemini-2.5-flash — more capable but slower
 MODEL_PIPELINE = [
-    ("gemini-2.5-flash", 3),
     ("gemini-2.5-flash-lite", 2),
+    ("gemini-2.5-flash", 2),
 ]
+
+# Reusable client singleton (avoids re-init overhead per call)
+_client_cache = {}
+
+
+def _get_client(api_key):
+    """Returns a cached Gemini client to avoid repeated initialization."""
+    if api_key not in _client_cache:
+        _client_cache[api_key] = genai.Client(api_key=api_key)
+    return _client_cache[api_key]
 
 
 class AIServiceError(Exception):
@@ -111,9 +123,8 @@ class AIService:
     @staticmethod
     def analyze_resume(job_title, job_description, resume_url):
         """
-        Analyzes a resume against a job description using Gemini.
-        Sends PDF bytes inline (no file upload) for maximum speed.
-        Returns (score, analysis_text) or (None, error_message).
+        Analyzes a resume against a job description using the Agentic ATS Architecture.
+        Returns (score, analysis_json_or_text).
         """
         api_key = getattr(settings, "GEMINI_API_KEY", None)
         if not api_key:
@@ -125,70 +136,87 @@ class AIService:
             return None, download_error or "Could not download resume"
 
         try:
-            # 2. Initialize Gemini Client
-            client = genai.Client(api_key=api_key)
+            # 2. Get cached Gemini Client (avoids re-initialization overhead)
+            client = _get_client(api_key)
 
-            # 3. Create inline PDF part (NO file upload needed)
+            # 3. Create inline PDF part
             pdf_part = types.Part.from_bytes(
                 data=pdf_bytes, mime_type="application/pdf"
             )
-            print(f"[AI] Inline PDF ready ({len(pdf_bytes)} bytes) — no upload needed")
 
-            # 4. Build prompt — detailed analysis (~1000 chars)
-            prompt = f"""You are an ATS (Applicant Tracking System) expert recruiter.
-Analyze this PDF resume against the job below.
+            # 4. Build the OPTIMIZED Prompt (calibrated scoring)
+            prompt = f"""You are an expert ATS screening engine. Analyze this resume against the job and produce balanced, realistic scores.
 
-JOB: {job_title}
-DESCRIPTION: {job_description}
+JOB TITLE: {job_title}
+JOB DESCRIPTION: {job_description[:2000]}
 
-Return EXACTLY this format:
-SCORE: [0-100]
-ANALYSIS:
-- Experience: [Provide a detailed 1-2 sentence overview of relevant experience, specific roles, and tenure]
-- Key Skills: [List 5-8 top matching skills for this role, highlighting specific technical proficiencies]
-- Strengths: [Provide a 2-3 sentence paragraph on what makes this candidate a strong fit, citing specific achievements]
-- Gaps: [Identify specific missing qualifications or areas for improvement in 1-2 sentences]
-- Verdict: [A comprehensive overall recommendation and reasoning]
+SCORING GUIDE (each sub-score is 0-100, then weighted):
+- Skills Match (25%): How well do candidate's skills align with the job requirements?
+- Project Relevance (20%): Are their projects complex, relevant, and well-described?
+- Experience Match (15%): Does their work history align with the role's seniority and domain?
+- Semantic Understanding (10%): Do they show deep understanding of the problem space?
+- Startup Compatibility (10%): Can they adapt, wear multiple hats, move fast?
+- Trust & Credibility (10%): Is the resume well-structured, consistent, detailed, and professional? A well-written resume with specific dates, metrics, and clear descriptions should score 60-90. Only flag low trust (below 30) if there are clear contradictions or red flags.
+- Communication (5%): Quality of writing, clarity, and structured thinking.
+- Growth Signals (5%): Evidence of continuous learning, side projects, certifications.
 
-Provide a deep, multi-line analysis for each section. Ensure the full ANALYSIS is between 800 and 1200 characters."""
+IMPORTANT: The final match_score should be the weighted sum. The trust_score in recruiter_view should reflect resume quality and consistency (typically 50-90 for normal resumes). Only score trust below 30 if there are CLEAR red flags like contradictory dates or fabricated claims.
 
-            # 5. Call Gemini with model pipeline (no upload/cleanup needed)
+Return ONLY this JSON:
+{{
+  "intelligence": {{
+    "candidate_info": {{ "full_name": "", "email": "", "location": "" }},
+    "summary": {{ "primary_role": "", "specialization": "", "years_of_experience": 0 }},
+    "skills": {{ "frontend": [], "backend": [], "database": [], "devops": [], "ai": [], "soft": [] }},
+    "experience": [ {{ "company": "", "role": "", "duration": "", "technologies": [] }} ],
+    "projects": [ {{ "name": "", "complexity_score": 0 }} ],
+    "startup_intel": {{ "startup_experience": false, "founder_mindset": false, "ownership_score": 0 }},
+    "trust_signals": {{ "resume_ai_probability": 0, "consistency_score": 0 }}
+  }},
+  "recruiter_view": {{
+    "match_score": 0,
+    "strengths": [],
+    "concerns": [],
+    "red_flags": [],
+    "startup_fit": "Low/Medium/High",
+    "trust_score": 0,
+    "recommended_action": "",
+    "explanation": "",
+    "interview_questions": []
+  }}
+}}"""
+
+            # 5. Call Gemini — optimized for speed
             last_error = None
             for model_name, max_retries in MODEL_PIPELINE:
                 for attempt in range(1, max_retries + 1):
                     try:
-                        print(
-                            f"[AI] Trying {model_name} (attempt {attempt}/{max_retries})"
-                        )
-
+                        t0 = time.time()
+                        print(f"[AI] ⚡ {model_name} attempt {attempt}")
                         response = client.models.generate_content(
                             model=model_name,
                             contents=[pdf_part, prompt],
                             config=types.GenerateContentConfig(
-                                max_output_tokens=8000,
-                                temperature=0.3,
+                                max_output_tokens=4000,
+                                temperature=0.1,
+                                response_mime_type="application/json",
                             ),
                         )
 
                         content = response.text
+                        elapsed = time.time() - t0
+                        print(f"[AI] ✅ {model_name} responded in {elapsed:.1f}s")
+
                         if content:
                             score, analysis = AIService._parse_response(content)
-                            print(f"[AI] ✅ {model_name}: score={score}")
                             return score, analysis
 
                         last_error = "Empty response"
-                        print(f"[AI] ⚠️ {model_name}: empty response")
-                        time.sleep(1)
-
                     except Exception as e:
                         last_error = str(e)
                         print(f"[AI] ⚠️ {model_name} error: {last_error}")
-                        if (
-                            "block" in last_error.lower()
-                            or "safety" in last_error.lower()
-                        ):
-                            break
-                        time.sleep(1 * attempt)
+                        if attempt < max_retries:
+                            time.sleep(0.5)  # Brief pause before retry
 
             return 0, f"AI analysis failed: {last_error}"
 
@@ -200,32 +228,24 @@ Provide a deep, multi-line analysis for each section. Ensure the full ANALYSIS i
 
     @staticmethod
     def _parse_response(content):
-        """Parses SCORE: and ANALYSIS: from Gemini response."""
-        score = 0
-        analysis = ""
+        """Parses the Agentic ATS JSON response."""
+        try:
+            # Clean up potential markdown code blocks
+            clean_content = content.strip()
+            if clean_content.startswith("```json"):
+                clean_content = clean_content[7:]
+            if clean_content.endswith("```"):
+                clean_content = clean_content[:-3]
 
-        for line in content.split("\n"):
-            line_stripped = line.strip()
-            if line_stripped.upper().startswith("SCORE:"):
-                try:
-                    score_text = line_stripped.split(":", 1)[1].strip()
-                    # Handle "85/100" or "85%" formats
-                    score_text = score_text.replace("%", "").split("/")[0].strip()
-                    score = int(score_text)
-                    score = max(0, min(100, score))  # Clamp 0-100
-                except (ValueError, IndexError):
-                    pass
-            elif line_stripped.upper().startswith("ANALYSIS:"):
-                # Capture everything after ANALYSIS: including multi-line content
-                analysis_start = content.upper().find("ANALYSIS:")
-                if analysis_start != -1:
-                    analysis = content[analysis_start + 9 :].strip()
+            data = json.loads(clean_content)
 
-        if not analysis:
-            analysis = content  # Use full response as fallback
+            # Extract score from recruiter_view
+            recruiter_view = data.get("recruiter_view", {})
+            score = recruiter_view.get("match_score", 0)
 
-        # Hard-cap at 1000 chars for detailed display
-        if len(analysis) > 20000:
-            analysis = analysis[:19997] + "..."
-
-        return score, analysis
+            # If everything is valid, return score and the full JSON string
+            return int(score), json.dumps(data)
+        except (json.JSONDecodeError, ValueError, KeyError) as e:
+            print(f"[AI] JSON Parse Error: {e}")
+            # Fallback to simple parsing if JSON fails (rare with Gemini response_mime_type)
+            return 0, content

@@ -17,7 +17,7 @@ class ChatRoomSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChatRoom
-        fields = ('id', 'name', 'is_group', 'participants_data', 'latest_message', 'created_at', 'updated_at')
+        fields = ('id', 'name', 'is_group', 'room_type', 'participants_data', 'latest_message', 'created_at', 'updated_at')
         read_only_fields = ('id', 'created_at', 'updated_at')
 
     def get_latest_message(self, obj):

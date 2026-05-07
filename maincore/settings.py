@@ -90,13 +90,16 @@ INSTALLED_APPS = [
     "notifications",
     "comments",
     "payments",
-    "AI",
     "subscription",
     "jobs",
     "news",
     "seo",
     "publicpages",
-    "AIAgents"
+    
+    #AI
+    "AIAgents",
+    "AI",
+    "AIInterview",
 ]
 
 MIDDLEWARE = [

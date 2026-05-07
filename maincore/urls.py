@@ -79,8 +79,11 @@ urlpatterns = [
     path("api/jobs/", include("jobs.urls")),
     path("api/news/", include("news.urls")),
     path("api/subscription/", include("subscription.urls")),
-    path("api/ai/", include("AI.urls")),
     path("api/seo/", include("seo.urls")),
     path("api/public/", include("publicpages.urls")),
+    
+    #AI
+    path("api/ai/", include("AI.urls")),
     path("api/AIAgents/", include("AIAgents.urls")),
+    path("api/AIInterview/", include("AIInterview.urls")),
 ]

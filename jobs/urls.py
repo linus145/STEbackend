@@ -16,7 +16,6 @@ urlpatterns = [
     path("posts/<uuid:job_id>/applications/", views.JobApplicationsView.as_view(), name="job-applications"),
     path("applications/<uuid:application_id>/status/", views.UpdateApplicationStatusView.as_view(), name="update-application-status"),
     path("applications/<uuid:application_id>/detail/", views.JobApplicationDetailView.as_view(), name="job-application-detail"),
-    path("posts/<uuid:job_id>/analyze-resumes/", views.AnalyzeResumesView.as_view(), name="job-analyze-resumes"),
     path("my-applications/", views.MyApplicationsView.as_view(), name="my-applications"),
 
     # ─── Dashboard Stats ────────────────────────────────────────

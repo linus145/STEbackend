@@ -20,16 +20,26 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_profile(self, obj):
         from interactions.serializers import MentorProfileSerializer
+        data = None
         if obj.role in [User.ROLE_FOUNDER, User.ROLE_CO_FOUNDER]:
             if hasattr(obj, 'founder_profile'):
-                return FounderSerializer(obj.founder_profile).data
+                data = FounderSerializer(obj.founder_profile).data
         elif obj.role == User.ROLE_INVESTOR:
             if hasattr(obj, 'investor_profile'):
-                return InvestorSerializer(obj.investor_profile).data
+                data = InvestorSerializer(obj.investor_profile).data
         elif obj.role == User.ROLE_MENTOR:
             if hasattr(obj, 'mentor_profile'):
-                return MentorProfileSerializer(obj.mentor_profile).data
-        return None
+                data = MentorProfileSerializer(obj.mentor_profile).data
+        
+        # Add company and HR info if available
+        if hasattr(obj, 'company_profile'):
+            if data is None: data = {}
+            data['company_name'] = obj.company_profile.company_name
+            if hasattr(obj.company_profile, 'hr_profile'):
+                data['hr_name'] = obj.company_profile.hr_profile.name
+                data['hr_designation'] = obj.company_profile.hr_profile.designation
+                
+        return data
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
