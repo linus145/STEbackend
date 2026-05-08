@@ -1,0 +1,271 @@
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.permissions import AllowAny
+from AIrounds.models import InterviewQuestion, InterviewSession
+from AIrounds.views.base import ResponseMixin
+
+class CandidateExamAccessView(APIView, ResponseMixin):
+    """
+    Candidate accesses their exam via the active link token.
+    No authentication required — the token IS the authentication.
+    """
+    permission_classes = (AllowAny,)
+    authentication_classes = []
+
+    def get(self, request, token):
+        from AIrounds.models import CandidateInterviewLink
+
+        try:
+            link = CandidateInterviewLink.objects.select_related(
+                'session', 'session__candidate'
+            ).get(token=token)
+        except CandidateInterviewLink.DoesNotExist:
+            return self.build_response("error", "Invalid exam link.", {}, status.HTTP_404_NOT_FOUND)
+
+        if not link.is_valid:
+            return self.build_response("error", "This exam link has expired or already been completed.", {}, status.HTTP_403_FORBIDDEN)
+
+        session = link.session
+
+        # Build rounds + questions payload
+        rounds_data = []
+        for rnd in session.rounds.all().order_by('created_at'):
+            questions = []
+            for q in rnd.questions.all().order_by('asked_at'):
+                q_data = {
+                    "id": str(q.id),
+                    "question_text": q.question_text,
+                    "question_type": q.question_type,
+                    "mcq_options": q.mcq_options,
+                }
+                questions.append(q_data)
+
+            rounds_data.append({
+                "id": str(rnd.id),
+                "designation": rnd.designation,
+                "strategy_tier": rnd.strategy_tier,
+                "difficulty": rnd.difficulty,
+                "question_format": rnd.question_format,
+                "programming_language": rnd.programming_language,
+                "timer_seconds": rnd.timer_seconds,
+                "max_questions": rnd.max_questions,
+                "questions": questions,
+            })
+
+        return self.build_response("success", "Exam data loaded.", {
+            "session_id": str(session.id),
+            "job_title": session.job_title,
+            "candidate_name": f"{session.candidate.first_name} {session.candidate.last_name}",
+            "status": link.status,
+            "expires_at": link.expires_at.isoformat() if link.expires_at else None,
+            "rounds": rounds_data,
+        })
+
+    def post(self, request, token):
+        """Candidate starts the exam — marks the link as STARTED."""
+        from AIrounds.models import CandidateInterviewLink
+        from django.utils import timezone
+
+        try:
+            link = CandidateInterviewLink.objects.get(token=token)
+        except CandidateInterviewLink.DoesNotExist:
+            return self.build_response("error", "Invalid exam link.", {}, status.HTTP_404_NOT_FOUND)
+
+        if not link.is_valid:
+            return self.build_response("error", "This exam link has expired or already been completed.", {}, status.HTTP_403_FORBIDDEN)
+
+        link.status = 'STARTED'
+        link.started_at = timezone.now()
+        link.ip_address = request.META.get('REMOTE_ADDR')
+        link.user_agent = request.META.get('HTTP_USER_AGENT', '')
+        link.save()
+
+        # Also activate the session
+        link.session.status = 'ACTIVE'
+        link.session.save(update_fields=['status'])
+
+        return self.build_response("success", "Exam started.", {
+            "session_id": str(link.session.id),
+            "started_at": link.started_at.isoformat(),
+        })
+
+
+
+class CandidateExamLoginView(APIView, ResponseMixin):
+    """
+    Candidate logs in with exam credentials (NOT Django auth).
+    Returns the full exam data if credentials are valid.
+    """
+    permission_classes = (AllowAny,)
+    authentication_classes = []
+
+    def post(self, request):
+        from AIrounds.models import CandidateInterviewLink
+
+        username = request.data.get('username', '').strip()
+        password = request.data.get('password', '').strip()
+
+        if not username or not password:
+            return self.build_response("error", "Username and password are required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        try:
+            link = CandidateInterviewLink.objects.select_related(
+                'session', 'session__candidate'
+            ).get(exam_username=username)
+        except CandidateInterviewLink.DoesNotExist:
+            return self.build_response("error", "Invalid credentials.", {}, status.HTTP_401_UNAUTHORIZED)
+
+        if link.exam_password != password:
+            return self.build_response("error", "Invalid credentials.", {}, status.HTTP_401_UNAUTHORIZED)
+
+        if not link.is_valid:
+            return self.build_response("error", "This exam has expired or already been completed.", {}, status.HTTP_403_FORBIDDEN)
+
+        session = link.session
+
+        # Build full exam payload
+        rounds_data = []
+        for rnd in session.rounds.all().order_by('created_at'):
+            questions = []
+            for q in rnd.questions.all().order_by('asked_at'):
+                q_data = {
+                    "id": str(q.id),
+                    "question_text": q.question_text,
+                    "question_type": q.question_type,
+                    "mcq_options": q.mcq_options,
+                    "candidate_answer": q.candidate_answer,
+                    "answered_at": q.answered_at.isoformat() if q.answered_at else None,
+                }
+                questions.append(q_data)
+
+            rounds_data.append({
+                "id": str(rnd.id),
+                "designation": rnd.designation,
+                "designation_display": rnd.get_designation_display(),
+                "strategy_tier": rnd.strategy_tier,
+                "difficulty": rnd.difficulty,
+                "question_format": rnd.question_format,
+                "programming_language": rnd.programming_language,
+                "timer_seconds": rnd.timer_seconds,
+                "max_questions": rnd.max_questions,
+                "questions": questions,
+            })
+
+        return self.build_response("success", "Login successful.", {
+            "session_id": str(session.id),
+            "exam_token": str(link.token),
+            "job_title": session.job_title,
+            "candidate_name": f"{session.candidate.first_name} {session.candidate.last_name}",
+            "status": link.status,
+            "expires_at": link.expires_at.isoformat() if link.expires_at else None,
+            "rounds": rounds_data,
+        })
+
+
+
+class CandidateSubmitAnswerView(APIView, ResponseMixin):
+    """
+    Candidate submits an answer for a specific question.
+    Authenticated via exam_token in request body.
+    """
+    permission_classes = (AllowAny,)
+    authentication_classes = []
+
+    def post(self, request, question_id):
+        from AIrounds.models import CandidateInterviewLink
+        from django.utils import timezone
+
+        exam_token = request.data.get('exam_token')
+        answer = request.data.get('answer', '')
+
+        if not exam_token:
+            return self.build_response("error", "exam_token is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        try:
+            link = CandidateInterviewLink.objects.get(token=exam_token)
+        except CandidateInterviewLink.DoesNotExist:
+            return self.build_response("error", "Invalid exam token.", {}, status.HTTP_401_UNAUTHORIZED)
+
+        if not link.is_valid:
+            return self.build_response("error", "Exam has expired or been completed.", {}, status.HTTP_403_FORBIDDEN)
+
+        # Mark as started if not already
+        if link.status == 'ACTIVE':
+            link.status = 'STARTED'
+            link.started_at = timezone.now()
+            link.ip_address = request.META.get('REMOTE_ADDR')
+            link.user_agent = request.META.get('HTTP_USER_AGENT', '')
+            link.save()
+            link.session.status = 'ACTIVE'
+            link.session.save(update_fields=['status'])
+
+        # Find and validate the question belongs to this session
+        try:
+            question = InterviewQuestion.objects.select_related('round__session').get(id=question_id)
+        except InterviewQuestion.DoesNotExist:
+            return self.build_response("error", "Question not found.", {}, status.HTTP_404_NOT_FOUND)
+
+        if str(question.round.session.id) != str(link.session.id):
+            return self.build_response("error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN)
+
+        # Save the answer
+        question.candidate_answer = answer
+        question.answered_at = timezone.now()
+        question.save(update_fields=['candidate_answer', 'answered_at'])
+
+        return self.build_response("success", "Answer submitted.", {
+            "question_id": str(question.id),
+            "answered_at": question.answered_at.isoformat(),
+        })
+
+
+
+class CandidateCompleteExamView(APIView, ResponseMixin):
+    """
+    Candidate finishes the exam. Marks session as completed.
+    """
+    permission_classes = (AllowAny,)
+    authentication_classes = []
+
+    def post(self, request):
+        from AIrounds.models import CandidateInterviewLink
+        from django.utils import timezone
+
+        exam_token = request.data.get('exam_token')
+
+        if not exam_token:
+            return self.build_response("error", "exam_token is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        try:
+            link = CandidateInterviewLink.objects.select_related('session').get(token=exam_token)
+        except CandidateInterviewLink.DoesNotExist:
+            return self.build_response("error", "Invalid exam token.", {}, status.HTTP_401_UNAUTHORIZED)
+
+        if link.status == 'COMPLETED':
+            return self.build_response("error", "Exam already completed.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Mark link and session as completed
+        link.status = 'COMPLETED'
+        link.completed_at = timezone.now()
+        link.save(update_fields=['status', 'completed_at'])
+
+        link.session.status = 'COMPLETED'
+        link.session.save(update_fields=['status'])
+
+        # Count answered questions
+        total_questions = 0
+        answered_count = 0
+        for rnd in link.session.rounds.all():
+            for q in rnd.questions.all():
+                total_questions += 1
+                if q.candidate_answer:
+                    answered_count += 1
+
+        return self.build_response("success", "Exam completed successfully.", {
+            "session_id": str(link.session.id),
+            "completed_at": link.completed_at.isoformat(),
+            "total_questions": total_questions,
+            "answered_questions": answered_count,
+        })
+
+

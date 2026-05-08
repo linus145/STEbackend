@@ -11,9 +11,9 @@ from rest_framework.views import APIView
 
 from jobs.models import JobApplication, JobPost
 
-from .models import AIScreeningReport
-from .serializers import AIScreeningReportSerializer
-from .services import AIService
+from AI.models import AIScreeningReport
+from AI.serializers import AIScreeningReportSerializer
+from AI.services import AIService
 
 User = get_user_model()
 

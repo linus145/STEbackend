@@ -86,4 +86,5 @@ urlpatterns = [
     path("api/ai/", include("AI.urls")),
     path("api/AIAgents/", include("AIAgents.urls")),
     path("api/AIInterview/", include("AIInterview.urls")),
+    path("api/AIrounds/", include("AIrounds.urls")),
 ]

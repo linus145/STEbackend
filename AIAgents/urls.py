@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import AgentTaskExecuteView
+from AIagents.views import AgentTaskExecuteView
 
 urlpatterns = [
     path('execute/', AgentTaskExecuteView.as_view(), name='agent_execute'),

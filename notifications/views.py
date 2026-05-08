@@ -2,8 +2,8 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from .models import Notification
-from .serializers import NotificationSerializer
+from notifications.models import Notification
+from notifications.serializers import NotificationSerializer
 
 class NotificationListView(generics.ListAPIView):
     serializer_class = NotificationSerializer

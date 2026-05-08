@@ -142,6 +142,7 @@ class JobApplication(SoftDeleteModel):
         ("PENDING", "Pending"),
         ("REVIEWED", "Reviewed"),
         ("SHORTLISTED", "Shortlisted"),
+        ("INTERVIEW", "Interview"),
         ("REJECTED", "Rejected"),
         ("HIRED", "Hired"),
     )

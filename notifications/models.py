@@ -11,6 +11,7 @@ class Notification(SoftDeleteModel):
         ('CONNECTION_ACCEPTED', 'Connection Accepted'),
         ('CONNECTION_REJECTED', 'Connection Rejected'),
         ('SYSTEM', 'System'),
+        ('INTERVIEW_INVITE', 'Interview Invitation'),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -99,7 +99,8 @@ INSTALLED_APPS = [
     #AI
     "AIAgents",
     "AI",
-    "AIInterview",
+    "AIInterview", 
+    "AIrounds",
 ]
 
 MIDDLEWARE = [
@@ -223,6 +224,9 @@ STORAGES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "useraccounts.CustomUser"
+
+# Frontend URL — used for generating candidate exam links
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://b2linq.in' if not DEBUG else 'http://localhost:3000')
 
 # CORS configuration
 CORS_ALLOW_ALL_ORIGINS = False

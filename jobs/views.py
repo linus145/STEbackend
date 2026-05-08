@@ -213,7 +213,18 @@ class UpdateApplicationStatusView(APIView, ResponseMixin):
             application, data=request.data, partial=True
         )
         if serializer.is_valid():
+            new_status = serializer.validated_data.get('status')
             serializer.save()
+            
+            # If moved to INTERVIEW, auto-orchestrate the AI session
+            if new_status == 'INTERVIEW':
+                try:
+                    from AIrounds.services.orchestrator import InterviewOrchestrator
+                    InterviewOrchestrator.auto_orchestrate(application)
+                except Exception as e:
+                    # Log error but don't fail the status update
+                    print(f"Auto-orchestration failed: {e}")
+            
             return self.build_response(
                 "success", "Status updated.", JobApplicationSerializer(application).data
             )

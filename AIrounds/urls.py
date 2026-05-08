@@ -1,0 +1,47 @@
+from django.urls import path
+from AIrounds.views import (
+    StartInterviewView, 
+    GetNextQuestionView, 
+    SubmitAnswerView, 
+    GetRoundSummaryView,
+    ConfigureInterviewView,
+    VerifyInviteTokenView,
+    UpdateVerificationView,
+    GenerateFinalReportView,
+    RecruiterSessionListView,
+    GenerateQuestionPoolView,
+    InterviewMetadataView,
+    GenerateInterviewLinkView,
+    CandidateExamAccessView,
+    CandidateExamLoginView,
+    CandidateSubmitAnswerView,
+    CandidateCompleteExamView,
+    SessionDetailView,
+    DeleteQuestionView,
+    RegenerateRoundQuestionsView,
+)
+
+urlpatterns = [
+    path('sessions/', RecruiterSessionListView.as_view(), name='session_list'),
+    path('start/', StartInterviewView.as_view(), name='start_interview'),
+    path('configure/', ConfigureInterviewView.as_view(), name='configure_interview'),
+    path('generate-questions/', GenerateQuestionPoolView.as_view(), name='generate_questions'),
+    path('verify-token/<uuid:token>/', VerifyInviteTokenView.as_view(), name='verify_token'),
+    path('round/<uuid:round_id>/next-question/', GetNextQuestionView.as_view(), name='next_question'),
+    path('question/<uuid:question_id>/submit/', SubmitAnswerView.as_view(), name='submit_answer'),
+    path('round/<uuid:round_id>/summary/', GetRoundSummaryView.as_view(), name='round_summary'),
+    path('session/<uuid:session_id>/verify/', UpdateVerificationView.as_view(), name='update_verification'),
+    path('session/<uuid:session_id>/report/', GenerateFinalReportView.as_view(), name='generate_report'),
+    path('metadata/', InterviewMetadataView.as_view(), name='interview_metadata'),
+    # Active Link System
+    path('generate-link/', GenerateInterviewLinkView.as_view(), name='generate_interview_link'),
+    path('exam/<uuid:token>/', CandidateExamAccessView.as_view(), name='candidate_exam_access'),
+    # Candidate Exam System
+    path('exam-login/', CandidateExamLoginView.as_view(), name='candidate_exam_login'),
+    path('exam-submit/<uuid:question_id>/', CandidateSubmitAnswerView.as_view(), name='candidate_submit_answer'),
+    path('exam-complete/', CandidateCompleteExamView.as_view(), name='candidate_complete_exam'),
+    # Recruiter Session Management
+    path('session/<uuid:session_id>/detail/', SessionDetailView.as_view(), name='session_detail'),
+    path('question/<uuid:question_id>/delete/', DeleteQuestionView.as_view(), name='delete_question'),
+    path('round/<uuid:round_id>/regenerate/', RegenerateRoundQuestionsView.as_view(), name='regenerate_round_questions'),
+]

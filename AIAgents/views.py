@@ -3,7 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from startups.models import CompanyProfile
-from .services import AIAgentService
+from AIAgents.services import AIAgentService
 
 class AgentTaskExecuteView(APIView):
     permission_classes = [IsAuthenticated]
