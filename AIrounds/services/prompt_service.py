@@ -45,6 +45,7 @@ QUESTION RESPONSE FORMAT:
   "round_type": "",
   "difficulty": "",
   "question": "",
+  "ideal_answer": "Detailed criteria or correct response for this specific question",
   "expected_topics": [],
   "skills_evaluated": [],
   "time_limit_seconds": 120

@@ -64,7 +64,8 @@ class InterviewOrchestrator:
                     InterviewQuestion.objects.create(
                         round=rnd,
                         question_text=q_text,
-                        marks=q_marks
+                        marks=q_marks,
+                        ideal_answer=q_data.get('ideal_answer') if isinstance(q_data, dict) else None
                     )
                     total_marks += q_marks
                     

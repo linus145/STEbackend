@@ -30,6 +30,7 @@ class InterviewEngineService:
             InterviewQuestion.objects.create(
                 round=round_obj,
                 question_text=data.get('question'),
+                ideal_answer=data.get('ideal_answer'),
                 expected_topics=data.get('expected_topics', [])
             )
             return data
@@ -51,11 +52,18 @@ class InterviewEngineService:
         previous_questions = InterviewQuestion.objects.filter(round=round_obj).order_by('asked_at')
         context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
         
-        prompt = f"Evaluate the following answer given the context.\n\nANSWER:\n{answer_text}\n\nCONTEXT:\n{context}"
+        prompt = (
+            f"Evaluate the candidate's answer against the provided ideal answer/criteria.\n\n"
+            f"QUESTION: {question.question_text}\n"
+            f"IDEAL ANSWER: {question.ideal_answer or 'Not provided. Evaluate based on industry best practices for this role and question context.'}\n"
+            f"CANDIDATE ANSWER: {answer_text}\n\n"
+            f"CONTEXT:\n{context}\n\n"
+            f"IMPORTANT: Return a JSON object with 'score' (out of {question.marks}), 'feedback', and 'key_points_missed' (array)."
+        )
         
         response_text = AIBaseService.generate_content(
             prompt=prompt,
-            system_instruction=InterviewPromptService.get_system_prompt(),
+            system_instruction="You are an expert interviewer evaluating a candidate's response. Be fair but rigorous.",
             temperature=0.3
         )
         
@@ -127,19 +135,21 @@ class InterviewEngineService:
             f"at '{difficulty}' difficulty level.\n\n"
             f"QUESTION FORMAT: {format_instruction}\n\n"
             f"CONTEXT:\n{context}\n\n"
-            f"IMPORTANT: Return ONLY a JSON object with a single key 'questions' containing "
-            f"an array of exactly {count} question strings. Example:\n"
-            f'{{"questions": ["Question 1?", "Question 2?"]}}'
+            f"IMPORTANT: For each question, provide an 'ideal_answer' or 'evaluation_criteria' that explains what a perfect answer should contain. "
+            f"Return ONLY a JSON object with a single key 'questions' containing "
+            f"an array of objects. Example:\n"
+            f'{{"questions": [{{"question": "What is Python?", "ideal_answer": "Python is a high-level, interpreted language known for..."}}, ...]}}'
         )
         
         system_prompt = (
             "You are an expert interview question generator. "
             "Generate role-specific, relevant questions based on the candidate's resume and the job description. "
-            "Return ONLY valid JSON with the key 'questions' containing an array of question strings. "
+            "For each question, also generate a detailed 'ideal_answer' which will be used as a key for evaluating the candidate's response. "
+            "Return ONLY valid JSON with the key 'questions' containing an array of objects with 'question' and 'ideal_answer' keys. "
             "No markdown, no extra text."
         )
         
-        logger.info(f"Generating {count} questions: designation={designation}, format={question_format}, lang={programming_language}")
+        logger.info(f"Generating {count} questions with evaluation keys: designation={designation}, format={question_format}")
         
         response_text = AIBaseService.generate_content(
             prompt=prompt,
@@ -152,11 +162,6 @@ class InterviewEngineService:
         try:
             data = json.loads(response_text)
             questions = data.get('questions', [])
-            if not questions:
-                if isinstance(data, list):
-                    questions = data
-                else:
-                    logger.warning(f"Unexpected AI response structure: {list(data.keys())}")
             return questions
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse AI response as JSON: {e}\nRaw: {response_text[:300]}")

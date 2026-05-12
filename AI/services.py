@@ -186,39 +186,49 @@ Return ONLY this JSON:
   }}
 }}"""
 
-            # 5. Call Gemini — optimized for speed
+            # 5. Call Gemini — optimized for speed and reliability
             last_error = None
             for model_name, max_retries in MODEL_PIPELINE:
                 for attempt in range(1, max_retries + 1):
                     try:
                         t0 = time.time()
-                        print(f"[AI] ⚡ {model_name} attempt {attempt}")
+                        print(f"[AI] ⚡ Calling {model_name} (Attempt {attempt})...")
+                        
                         response = client.models.generate_content(
                             model=model_name,
                             contents=[pdf_part, prompt],
                             config=types.GenerateContentConfig(
-                                max_output_tokens=4000,
+                                max_output_tokens=3000, # Reduced for speed
                                 temperature=0.1,
                                 response_mime_type="application/json",
                             ),
                         )
 
-                        content = response.text
-                        elapsed = time.time() - t0
-                        print(f"[AI] ✅ {model_name} responded in {elapsed:.1f}s")
-
-                        if content:
+                        if response and response.text:
+                            content = response.text
+                            elapsed = time.time() - t0
+                            print(f"[AI] ✅ {model_name} response received in {elapsed:.1f}s")
+                            
                             score, analysis = AIService._parse_response(content)
-                            return score, analysis
-
-                        last_error = "Empty response"
+                            if score is not None:
+                                return score, analysis
+                            else:
+                                last_error = "Parser returned None"
+                        else:
+                            last_error = "Empty response from Gemini"
+                            
                     except Exception as e:
                         last_error = str(e)
-                        print(f"[AI] ⚠️ {model_name} error: {last_error}")
-                        if attempt < max_retries:
-                            time.sleep(0.5)  # Brief pause before retry
+                        print(f"[AI] ⚠️ {model_name} failed: {last_error}")
+                        # Exponential backoff for rate limits
+                        if "429" in last_error or "Quota" in last_error:
+                            sleep_time = 2 * attempt
+                            print(f"[AI] Rate limit hit. Sleeping for {sleep_time}s...")
+                            time.sleep(sleep_time)
+                        else:
+                            time.sleep(1) # General small wait
 
-            return 0, f"AI analysis failed: {last_error}"
+            return 0, f"AI analysis failed after all retries. Last error: {last_error}"
 
         except Exception as e:
             print(f"[AI] Analysis error: {e}")

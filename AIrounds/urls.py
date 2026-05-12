@@ -19,6 +19,7 @@ from AIrounds.views import (
     SessionDetailView,
     DeleteQuestionView,
     RegenerateRoundQuestionsView,
+    EvaluateSessionView,
 )
 
 urlpatterns = [
@@ -44,4 +45,5 @@ urlpatterns = [
     path('session/<uuid:session_id>/detail/', SessionDetailView.as_view(), name='session_detail'),
     path('question/<uuid:question_id>/delete/', DeleteQuestionView.as_view(), name='delete_question'),
     path('round/<uuid:round_id>/regenerate/', RegenerateRoundQuestionsView.as_view(), name='regenerate_round_questions'),
+    path('session/<uuid:session_id>/evaluate/', EvaluateSessionView.as_view(), name='evaluate_session'),
 ]

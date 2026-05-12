@@ -91,14 +91,14 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         from django.utils import timezone
         from datetime import timedelta
         
-        ten_minutes_ago = timezone.now() - timedelta(minutes=10)
+        two_minutes_ago = timezone.now() - timedelta(minutes=2)
         existing_report = AIScreeningReport.objects.filter(
             job_id=job.id, 
             results__status="processing"
         ).first()
         
-        # If a report is processing but it's very old, assume it's stale and allow a new one
-        is_stale = existing_report and existing_report.created_at < ten_minutes_ago
+        # If a report is processing but older than 2 min, it's likely stuck — allow restart
+        is_stale = existing_report and existing_report.created_at < two_minutes_ago
         
         if existing_report and not is_stale:
             return self.build_response(
@@ -106,6 +106,12 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                 {**existing_report.results, "report_id": str(existing_report.id), "job_id": str(job.id)},
                 status_code=status.HTTP_202_ACCEPTED
             )
+        
+        # Mark any stale reports as failed so they don't block future runs
+        if existing_report and is_stale:
+            existing_report.results["status"] = "failed"
+            existing_report.results["error"] = "Timed out — marked as stale"
+            existing_report.save()
 
         # 3. Create Processing Report
         report = AIScreeningReport.objects.create(
@@ -118,16 +124,21 @@ class AnalyzeResumesView(APIView, ResponseMixin):
 
         # 4. Background Thread Logic
         def run_screening_background(job_id, user_id, app_ids, report_id):
-            # Close connection to avoid reuse issues in thread
+            # Close inherited connection to force a fresh one in this thread
             connection.close()
             
             report = None
             try:
+                # Ensure fresh DB connection
+                connection.ensure_connection()
+                
                 # Re-fetch objects in this thread's context
                 job = JobPost.objects.get(id=job_id)
                 user = User.objects.get(id=user_id)
                 report = AIScreeningReport.objects.get(id=report_id)
-                apps_to_screen = JobApplication.objects.filter(id__in=app_ids).select_related("applicant")
+                apps_to_screen = list(JobApplication.objects.filter(id__in=app_ids).select_related("applicant"))
+                
+                print(f"[AI] Background thread started. Screening {len(apps_to_screen)} candidates for job: {job.title}")
                 
                 processed_count = 0
                 errors = []
@@ -135,32 +146,58 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                 full_job_info = f"{job.description}\n\nREQUIRED SKILLS: {job_skills}"
 
                 def screen_one(app):
+                    # Each thread worker needs its own connection
+                    connection.close()
                     try:
+                        print(f"[AI] Starting screening for candidate: {app.applicant.email}")
                         score, analysis_json = AIService.analyze_resume(job.title, full_job_info, app.resume_url)
+                        print(f"[AI] Finished screening {app.applicant.email}: score={score}")
                         return app.id, score, analysis_json
                     except Exception as e: 
+                        print(f"[AI] Error screening {app.applicant.email}: {e}")
                         return app.id, None, str(e)
+                    finally:
+                        connection.close()
 
+                # Parallel screening: up to 10 concurrent Gemini API calls
                 with ThreadPoolExecutor(max_workers=10) as executor:
                     futures = {executor.submit(screen_one, app): app for app in apps_to_screen if app.resume_url}
+                    
+                    if not futures:
+                        print("[AI] No candidates with resume URLs found!")
+                        errors.append("No candidates have uploaded resumes.")
+                    
                     for future in as_completed(futures):
-                        app_id, score, analysis_json = future.result()
-                        with transaction.atomic():
-                            app = JobApplication.objects.select_for_update().get(id=app_id)
-                            if score is not None:
-                                app.ai_score = score
-                                app.ai_analysis = analysis_json
-                                if app.status == "PENDING": 
-                                    app.status = "REVIEWED"
-                                app.save()
-                                processed_count += 1
-                            else: 
-                                errors.append(f"{app.applicant.email}: {analysis_json}")
+                        try:
+                            app_id, score, analysis_json = future.result(timeout=120)
+                            
+                            # Ensure connection is alive for DB write
+                            connection.ensure_connection()
+                            
+                            with transaction.atomic():
+                                app = JobApplication.objects.select_for_update().get(id=app_id)
+                                if score is not None:
+                                    app.ai_score = score
+                                    app.ai_analysis = analysis_json
+                                    if app.status == "PENDING": 
+                                        app.status = "REVIEWED"
+                                    app.save()
+                                    processed_count += 1
+                                    print(f"[AI] ✅ Candidate {app.applicant.email} screened. Score: {score}")
+                                else: 
+                                    errors.append(f"{app.applicant.email}: {analysis_json}")
+                                    print(f"[AI] ❌ Candidate {app.applicant.email} failed: {analysis_json}")
 
-                        # Update progress in the report so frontend sees it
-                        report.results["processed_count"] = processed_count
-                        report.save(update_fields=['results'])
+                            # Update progress in the report so frontend sees it
+                            report.results["processed_count"] = processed_count
+                            report.save(update_fields=['results'])
+                        except Exception as e:
+                            print(f"[AI] Future execution error: {e}")
+                            errors.append(f"Execution error: {str(e)}")
 
+                # Ensure connection for final query
+                connection.ensure_connection()
+                
                 # Final Rankings Construction
                 all_scored = JobApplication.objects.filter(job=job, ai_score__isnull=False, is_deleted=False).select_related("applicant").order_by("-ai_score")
                 results_data = []

@@ -25,6 +25,7 @@ distro==1.9.0
 Django==5.2
 django-celery-results==2.5.1
 django-cors-headers==4.9.0
+django-filter==25.2
 djangorestframework==3.17.1
 djangorestframework_simplejwt==5.5.1
 dnspython==2.8.0
@@ -58,6 +59,7 @@ packaging==26.1
 pdfminer.six==20251230
 pdfplumber==0.11.9
 pillow==12.2.0
+playwright==1.59.0
 prompt_toolkit==3.0.52
 proto-plus==1.27.2
 protobuf==5.29.6
@@ -68,6 +70,7 @@ pyasn1_modules==0.4.2
 pycparser==3.0
 pydantic==2.13.3
 pydantic_core==2.46.3
+pyee==13.0.1
 PyJWT==2.12.1
 pyOpenSSL==26.0.0
 pyparsing==3.3.2

@@ -17,6 +17,8 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import path, include
+from maincore.upload_views import ImageUploadView
+
 
 # Customize Admin Site
 admin.site.site_header = "B2linq Admin Panel"
@@ -24,13 +26,49 @@ admin.site.site_title = "B2linq Admin"
 admin.site.index_title = "Network Architect Control Center"
 
 
-# Reorder Admin Apps (Move UserAccounts to top)
+# Reorder and Group Admin Apps
 def get_app_list(self, request, app_label=None):
     app_dict = self._build_app_dict(request, app_label)
+    
+    # HR related apps to aggregate
+    hr_app_labels = [
+        "employees", "attendance", "leave_management", 
+        "organization", "payroll", "performance",
+        "AIAgents", "Ahrmagent1", "Ahrmagent2"
+    ]
+    
+    hr_models = []
+    hr_app_entry = None
+    
+    # Collect all models from HR apps and remove them from original dict
+    for label in hr_app_labels:
+        if label in app_dict:
+            app = app_dict.pop(label)
+            hr_models.extend(app["models"])
+            if not hr_app_entry:
+                # Copy the app structure but we'll override the list of models
+                hr_app_entry = app.copy()
+    
+    # Create the aggregated HR Tool entry
+    if hr_app_entry:
+        hr_app_entry["name"] = "HR Tool"
+        hr_app_entry["app_label"] = "hr_tool"
+        # Sort models by name and remove duplicates just in case
+        seen_models = set()
+        unique_models = []
+        for model in hr_models:
+            model_key = f"{model.get('object_name')}"
+            if model_key not in seen_models:
+                unique_models.append(model)
+                seen_models.add(model_key)
+        
+        hr_app_entry["models"] = sorted(unique_models, key=lambda x: x["name"])
+        app_dict["hr_tool"] = hr_app_entry
+
     app_list = sorted(app_dict.values(), key=lambda x: x["name"].lower())
 
     # Custom priority order
-    priority_apps = ["useraccounts", "posts", "notifications", "comments"]
+    priority_apps = ["useraccounts", "hr_tool", "posts", "notifications", "comments"]
 
     sorted_app_list = []
     # Add priority apps first
@@ -53,7 +91,6 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 
-from maincore.upload_views import ImageUploadView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -84,7 +121,24 @@ urlpatterns = [
     
     #AI
     path("api/ai/", include("AI.urls")),
-    path("api/AIAgents/", include("AIAgents.urls")),
     path("api/AIInterview/", include("AIInterview.urls")),
     path("api/AIrounds/", include("AIrounds.urls")),
+
+    #agents
+    path("api/AIAgents/", include("AIAgents.urls")),
+    path("api/autonomousagent1/", include("Ahrmagent1.urls")),
+    path("api/hrmagent2/", include("Ahrmagent2.urls")),
+
+    #HR
+    path("api/employees/", include("employees.urls")),
+    path("api/attendance/", include("attendance.urls")),
+    path("api/leave_management/", include("leave_management.urls")),
+    path("api/organization/", include("organization.urls")),
+    path("api/payroll/", include("payroll.urls")),
+    path("api/performance/", include("performance.urls")),
 ]
+from django.conf import settings
+from django.conf.urls.static import static
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

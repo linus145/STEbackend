@@ -263,10 +263,12 @@ class SessionDetailView(APIView, ResponseMixin):
                 questions.append({
                     "id": str(q.id),
                     "question_text": q.question_text,
+                    "ideal_answer": q.ideal_answer,
                     "question_type": q.question_type,
                     "mcq_options": q.mcq_options,
                     "candidate_answer": q.candidate_answer,
                     "answered_at": q.answered_at.isoformat() if q.answered_at else None,
+                    "evaluation": q.evaluation,
                 })
             rounds_data.append({
                 "id": str(rnd.id),
@@ -370,15 +372,25 @@ class RegenerateRoundQuestionsView(APIView, ResponseMixin):
 
             # Create new questions
             new_questions = []
-            for q_text in questions:
+            for q_data in questions:
+                # Handle both string (fallback) and dict (new format)
+                if isinstance(q_data, dict):
+                    q_text = q_data.get('question')
+                    q_ideal = q_data.get('ideal_answer')
+                else:
+                    q_text = q_data
+                    q_ideal = None
+
                 q = InterviewQuestion.objects.create(
                     round=rnd,
                     question_text=q_text,
+                    ideal_answer=q_ideal,
                     question_type=rnd.question_format or 'TEXT',
                 )
                 new_questions.append({
                     "id": str(q.id),
                     "question_text": q.question_text,
+                    "ideal_answer": q.ideal_answer,
                     "question_type": q.question_type,
                 })
 
@@ -388,3 +400,60 @@ class RegenerateRoundQuestionsView(APIView, ResponseMixin):
             })
         except Exception as e:
             return self.build_response("error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class EvaluateSessionView(APIView, ResponseMixin):
+    """
+    Triggers AI evaluation for all questions in a session.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, session_id):
+        try:
+            session = InterviewSession.objects.prefetch_related('rounds__questions').get(id=session_id)
+        except InterviewSession.DoesNotExist:
+            return self.build_response("error", "Session not found.", {}, status.HTTP_404_NOT_FOUND)
+
+        results = []
+        total_session_score = 0
+        total_max_marks = 0
+
+        for rnd in session.rounds.all():
+            round_score = 0
+            for q in rnd.questions.all():
+                if q.candidate_answer and (not q.evaluation or request.data.get('force', False)):
+                    try:
+                        eval_data = InterviewEngineService.evaluate_answer(
+                            str(session.id), str(rnd.id), str(q.id), q.candidate_answer
+                        )
+                        q.evaluation = eval_data
+                        q.save()
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger("ai_rounds.recruiter")
+                        logger.error(f"Error evaluating question {q.id}: {e}")
+                
+                if q.evaluation and isinstance(q.evaluation, dict):
+                    score = q.evaluation.get('score', 0)
+                    round_score += score
+                    total_session_score += score
+                
+                total_max_marks += q.marks
+            
+            rnd.round_score = round_score
+            rnd.save()
+            results.append({
+                "round_id": str(rnd.id),
+                "round_score": round_score,
+            })
+
+        session.overall_score = total_session_score
+        session.status = 'COMPLETED'
+        session.save()
+
+        return self.build_response("success", "Evaluation complete.", {
+            "session_id": str(session.id),
+            "overall_score": total_session_score,
+            "total_max_marks": total_max_marks,
+            "rounds": results
+        })

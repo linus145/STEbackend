@@ -165,6 +165,16 @@ class JobApplication(SoftDeleteModel):
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="PENDING", db_index=True
     )
+    employment_type = models.CharField(
+        max_length=20, 
+        choices=(
+            ('FULL_TIME', 'Permanent'),
+            ('CONTRACT', 'Contractor'),
+            ('INTERNSHIP', 'Internship'),
+        ),
+        null=True,
+        blank=True
+    )
 
     # AI Analysis Fields
     ai_score = models.IntegerField(

@@ -97,10 +97,23 @@ INSTALLED_APPS = [
     "publicpages",
     
     #AI
-    "AIAgents",
     "AI",
     "AIInterview", 
     "AIrounds",
+    
+    #agent
+    "AIAgents",
+    "Ahrmagent1",
+    "Ahrmagent2",
+    
+
+    #HR
+    "organization",
+    "employees",
+    "attendance",
+    "leave_management",
+    "payroll",
+    "performance",
 ]
 
 MIDDLEWARE = [
@@ -207,6 +220,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # Enable WhiteNoise for static files
 STORAGES = {

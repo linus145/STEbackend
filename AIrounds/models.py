@@ -191,6 +191,7 @@ class InterviewQuestion(models.Model):
     question_text = models.TextField()
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES, default='TEXT')
     mcq_options = models.JSONField(null=True, blank=True)  # [{"label": "A", "text": "...", "is_correct": true}]
+    ideal_answer = models.TextField(null=True, blank=True) # AI-generated ideal answer or evaluation criteria
     expected_topics = models.JSONField(null=True, blank=True)
     marks = models.IntegerField(default=10)
     candidate_answer = models.TextField(null=True, blank=True)

@@ -245,7 +245,7 @@ class JobApplicationStatusSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = JobApplication
-        fields = ("status",)
+        fields = ("status", "employment_type")
 
 
 class TalentPipelineSerializer(serializers.ModelSerializer):

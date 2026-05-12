@@ -151,7 +151,7 @@ class AIAgentService:
                 "email": u.email,
             })
             
-        from .models import AISearchHistory
+        from AIAgents.models import AISearchHistory
         AISearchHistory.objects.create(
             user=user,
             query=prompt,
@@ -168,7 +168,7 @@ class AIAgentService:
 
     @staticmethod
     def get_talent_search_history(user):
-        from .models import AISearchHistory
+        from AIAgents.models import AISearchHistory
         qs = AISearchHistory.objects.filter(user=user).order_by('-created_at')[:20]
         return [
             {

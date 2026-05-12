@@ -5,8 +5,8 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.generics import get_object_or_404, ListAPIView
 
-from .models import JobPost, JobApplication, Skill, TalentPipeline
-from .serializers import (
+from jobs.models import JobPost, JobApplication, Skill, TalentPipeline
+from jobs.serializers import (
     JobPostListSerializer,
     JobPostDetailSerializer,
     JobPostCreateSerializer,
@@ -17,8 +17,8 @@ from .serializers import (
     SkillSerializer,
     TalentPipelineSerializer,
 )
-from .permissions import IsCompanyOwner, IsJobOwner
-from .services import JobService
+from jobs.permissions import IsCompanyOwner, IsJobOwner
+from jobs.services import JobService
 from AI.services import AIService
 from maincore.pagination import StandardResultsSetPagination
 
@@ -271,9 +271,13 @@ class JobApplicationDetailView(APIView, ResponseMixin):
 class SkillListView(APIView, ResponseMixin):
     """
     GET: List all available skills, optionally filtered by category.
+    POST: Create a new skill (Recruiter only).
     """
 
-    permission_classes = (AllowAny,)  # Allow public fetching for dropdowns
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsAuthenticated(), IsCompanyOwner()]
+        return [AllowAny()]
 
     def get(self, request):
         category = request.query_params.get("category")
@@ -283,6 +287,17 @@ class SkillListView(APIView, ResponseMixin):
 
         serializer = SkillSerializer(qs, many=True)
         return self.build_response("success", "Skills fetched.", serializer.data)
+
+    def post(self, request):
+        serializer = SkillSerializer(data=request.data)
+        if serializer.is_valid():
+            skill = serializer.save()
+            return self.build_response(
+                "success", "Skill created.", serializer.data, status.HTTP_201_CREATED
+            )
+        return self.build_response(
+            "error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST
+        )
 
 
 class AnalyzeResumesView(APIView, ResponseMixin):
