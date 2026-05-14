@@ -120,6 +120,25 @@ class JobPost(SoftDeleteModel):
     def __str__(self):
         return f"{self.title} at {self.company.company_name}"
 
+    def delete(self, using=None, keep_parents=False):
+        """Soft delete job and hard delete all associated recruitment data."""
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.status = "CLOSED" # Ensure it's not active anymore
+        self.save()
+
+        # 1. Soft delete all applications
+        apps = self.applications.all()
+        for app in apps:
+            app.delete() # This triggers InterviewSession deletion via JobApplication.delete
+
+        # 2. Hard delete all screening reports
+        try:
+            from AI.models import AIScreeningReport
+            AIScreeningReport.objects.filter(job_id=self.id).delete()
+        except ImportError:
+            pass
+
     @property
     def applications_count(self):
         return getattr(
@@ -166,14 +185,14 @@ class JobApplication(SoftDeleteModel):
         max_length=20, choices=STATUS_CHOICES, default="PENDING", db_index=True
     )
     employment_type = models.CharField(
-        max_length=20, 
+        max_length=20,
         choices=(
-            ('FULL_TIME', 'Permanent'),
-            ('CONTRACT', 'Contractor'),
-            ('INTERNSHIP', 'Internship'),
+            ("FULL_TIME", "Permanent"),
+            ("CONTRACT", "Contractor"),
+            ("INTERNSHIP", "Internship"),
         ),
         null=True,
-        blank=True
+        blank=True,
     )
 
     # AI Analysis Fields
@@ -195,6 +214,16 @@ class JobApplication(SoftDeleteModel):
 
     def __str__(self):
         return f"{self.applicant.email} → {self.job.title}"
+
+    def delete(self, using=None, keep_parents=False):
+        """Override delete to ensure related InterviewSessions are removed."""
+        self.is_deleted = True
+        self.deleted_at = timezone.now()
+        self.save()
+        
+        # Explicitly delete related InterviewSessions since soft-delete 
+        # doesn't trigger database-level CASCADE
+        self.interview_sessions.all().delete()
 
 
 class AppliedJob(models.Model):
@@ -222,6 +251,7 @@ class TalentPipeline(SoftDeleteModel):
     """
     A talent saved by a company for future consideration or active recruitment tracking.
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(
         "startups.CompanyProfile",

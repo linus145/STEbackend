@@ -57,7 +57,6 @@ class ConfigureInterviewView(APIView, ResponseMixin):
         except Exception as e:
             return self.build_response("error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 class GenerateQuestionPoolView(APIView, ResponseMixin):
     """
     Recruiter requests AI to generate a pool of questions for configuration.
@@ -69,6 +68,7 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
         round_type = request.data.get('type', 'TECHNICAL')
         designation = request.data.get('designation', 'TECHNICAL_SCREENING')
         difficulty = request.data.get('difficulty', 'MID')
+        round_category = request.data.get('round_category', 'NON_CODING')
         question_format = request.data.get('question_format', 'TEXT')
         programming_language = request.data.get('programming_language', '')
         count = request.data.get('count', 5)
@@ -78,10 +78,12 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
 
         try:
             questions = InterviewEngineService.generate_question_pool(
-                application_id, round_type, designation, difficulty, question_format, programming_language, count
+                application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count
             )
             return self.build_response("success", "Questions generated.", {"questions": questions})
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return self.build_response("error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -100,6 +102,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
             # 1. Get all InterviewSessions for the company that are in the INTERVIEW stage
             all_sessions = InterviewSession.objects.filter(
                 application__job__company=company,
+                application__job__status='ACTIVE',
                 application__status='INTERVIEW'
             ).select_related('candidate', 'application', 'application__job').prefetch_related('rounds').order_by('-created_at')
             
@@ -147,6 +150,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
             # 2. Get JobApplications with status='INTERVIEW' that don't have a session yet
             pending_apps = JobApplication.objects.filter(
                 job__company=company,
+                job__status='ACTIVE',
                 status='INTERVIEW'
             ).exclude(
                 id__in=seen_application_ids
@@ -275,6 +279,7 @@ class SessionDetailView(APIView, ResponseMixin):
                 "designation": rnd.designation,
                 "designation_display": rnd.get_designation_display(),
                 "strategy_tier": rnd.strategy_tier,
+                "round_category": rnd.round_category,
                 "difficulty": rnd.difficulty,
                 "question_format": rnd.question_format,
                 "programming_language": rnd.programming_language,
@@ -404,7 +409,9 @@ class RegenerateRoundQuestionsView(APIView, ResponseMixin):
 
 class EvaluateSessionView(APIView, ResponseMixin):
     """
-    Triggers AI evaluation for all questions in a session.
+    Aggregates scores for all rounds in a session.
+    Does NOT call AI — only recalculates from existing evaluations.
+    For AI evaluation, use EvaluateQuestionView per question.
     """
     permission_classes = (IsAuthenticated,)
 
@@ -417,29 +424,20 @@ class EvaluateSessionView(APIView, ResponseMixin):
         results = []
         total_session_score = 0
         total_max_marks = 0
+        unevaluated_count = 0
 
         for rnd in session.rounds.all():
             round_score = 0
             for q in rnd.questions.all():
-                if q.candidate_answer and (not q.evaluation or request.data.get('force', False)):
-                    try:
-                        eval_data = InterviewEngineService.evaluate_answer(
-                            str(session.id), str(rnd.id), str(q.id), q.candidate_answer
-                        )
-                        q.evaluation = eval_data
-                        q.save()
-                    except Exception as e:
-                        import logging
-                        logger = logging.getLogger("ai_rounds.recruiter")
-                        logger.error(f"Error evaluating question {q.id}: {e}")
-                
                 if q.evaluation and isinstance(q.evaluation, dict):
                     score = q.evaluation.get('score', 0)
                     round_score += score
                     total_session_score += score
-                
+                elif q.candidate_answer:
+                    unevaluated_count += 1
+
                 total_max_marks += q.marks
-            
+
             rnd.round_score = round_score
             rnd.save()
             results.append({
@@ -448,12 +446,115 @@ class EvaluateSessionView(APIView, ResponseMixin):
             })
 
         session.overall_score = total_session_score
-        session.status = 'COMPLETED'
+        if unevaluated_count == 0 and total_max_marks > 0:
+            session.status = 'COMPLETED'
         session.save()
 
-        return self.build_response("success", "Evaluation complete.", {
+        return self.build_response("success", "Score aggregation complete.", {
             "session_id": str(session.id),
             "overall_score": total_session_score,
             "total_max_marks": total_max_marks,
+            "unevaluated_count": unevaluated_count,
             "rounds": results
         })
+
+
+class EvaluateQuestionView(APIView, ResponseMixin):
+    """
+    Evaluates a SINGLE question using AI.
+    Called per-question from the frontend for real-time progress.
+    Fast enough to avoid ASGI timeout (single Gemini call ~3-5s).
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, question_id):
+        try:
+            question = InterviewQuestion.objects.select_related(
+                'round__session'
+            ).get(id=question_id)
+        except InterviewQuestion.DoesNotExist:
+            return self.build_response("error", "Question not found.", {}, status.HTTP_404_NOT_FOUND)
+
+        if not question.candidate_answer:
+            return self.build_response("error", "No candidate answer to evaluate.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Skip if already evaluated (unless force=true)
+        force = request.data.get('force', False)
+        if question.evaluation and not force:
+            return self.build_response("success", "Already evaluated.", {
+                "question_id": str(question.id),
+                "evaluation": question.evaluation,
+                "already_evaluated": True,
+            })
+
+        try:
+            eval_data = InterviewEngineService.evaluate_answer(
+                str(question.round.session.id),
+                str(question.round.id),
+                str(question.id),
+                question.candidate_answer
+            )
+            return self.build_response("success", "Question evaluated.", {
+                "question_id": str(question.id),
+                "evaluation": eval_data,
+                "already_evaluated": False,
+            })
+        except Exception as e:
+            import logging
+            logger = logging.getLogger("ai_rounds.recruiter")
+            logger.error(f"Error evaluating question {question_id}: {e}")
+            return self.build_response("error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class DeleteInterviewSessionView(APIView, ResponseMixin):
+    """
+    Deletes an interview session permanently.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def delete(self, request, session_id):
+        from jobs.models import JobApplication
+        try:
+            if session_id.startswith('pending_'):
+                # Handle pending (non-orchestrated) candidates:
+                # DON'T delete the application — just revert status back to REVIEWED
+                # so it leaves the pipeline but the application data is preserved.
+                application_id = session_id.replace('pending_', '')
+                try:
+                    application = JobApplication.objects.select_related('job__company').get(id=application_id)
+                    
+                    # Verify ownership
+                    from startups.models import CompanyProfile
+                    company = CompanyProfile.objects.get(owner=request.user)
+                    if application.job.company != company:
+                        return self.build_response("error", "Unauthorized.", {}, status.HTTP_403_FORBIDDEN)
+                    
+                    # Revert status instead of deleting the whole application
+                    application.status = 'REVIEWED'
+                    application.save()
+                    return self.build_response("success", "Candidate removed from interview pipeline.", {})
+                except JobApplication.DoesNotExist:
+                    return self.build_response("error", "Application not found.", {}, status.HTTP_404_NOT_FOUND)
+            
+            # Handle orchestrated session deletion:
+            # ONLY delete the InterviewSession (rounds, questions, exam link cascade automatically).
+            # The JobApplication and JobPost remain intact.
+            session = InterviewSession.objects.select_related('application__job__company').get(id=session_id)
+            
+            # Verify ownership
+            from startups.models import CompanyProfile
+            try:
+                company = CompanyProfile.objects.get(owner=request.user)
+                if session.application and session.application.job.company != company:
+                    return self.build_response("error", "Unauthorized.", {}, status.HTTP_403_FORBIDDEN)
+            except CompanyProfile.DoesNotExist:
+                return self.build_response("error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND)
+            
+            # Only delete the interview session — NOT the application
+            # Django CASCADE will automatically delete: rounds → questions, exam links
+            session.delete()
+            return self.build_response("success", "Interview session deleted. Application data preserved.", {})
+        except InterviewSession.DoesNotExist:
+            return self.build_response("error", "Session not found.", {}, status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return self.build_response("error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR)

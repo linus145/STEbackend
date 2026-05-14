@@ -147,7 +147,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "maincore.wsgi.application"
 ASGI_APPLICATION = "maincore.asgi.application"
-# NOTE: For AI screening, run with: daphne --http-timeout 300 maincore.asgi:application
+# Increase Daphne timeout for AI endpoints (question generation, evaluation)
+DAPHNE_REQUEST_TIMEOUT = 180  # 3 minutes
 
 
 if DEBUG:

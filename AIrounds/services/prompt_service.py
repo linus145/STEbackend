@@ -99,8 +99,8 @@ FINAL ROUND SUMMARY FORMAT:
                 "experience": session.candidate_experience
             },
             "round_info": {
-                "strategy_tier": round_obj.strategy_tier,
                 "designation": round_obj.designation,
+                "designation_display": round_obj.get_designation_display(),
                 "difficulty": round_obj.difficulty
             },
             "previous_data": [
@@ -113,20 +113,31 @@ FINAL ROUND SUMMARY FORMAT:
         }
         return json.dumps(context)
     @staticmethod
-    def build_config_context(application, round_type, designation, difficulty):
+    def build_config_context(application, round_type, designation, difficulty, round_category='NON_CODING'):
         """Constructs context for pre-interview question generation."""
         context = {
             "job_info": {
                 "title": application.job.title,
-                "description": application.job.description
-            },
-            "candidate_info": {
-                "resume": application.ai_analysis if application.ai_analysis else "No resume data available",
+                "description": application.job.description,
+                "skills": application.job.skills_required if application.job.skills_required else [],
             },
             "round_info": {
-                "strategy_tier": round_type,
                 "designation": designation,
-                "difficulty": difficulty
+                "difficulty": difficulty,
+                "round_category": round_category,
             }
         }
+
+        # For CODING rounds: focus on job role & skills, NOT the candidate's resume
+        # Coding questions should test programming ability relevant to the role
+        if round_category == 'CODING':
+            context["candidate_info"] = {
+                "note": "Generate coding questions based on the job role and required skills. Do NOT reference the candidate's resume."
+            }
+        else:
+            # For NON-CODING rounds: include resume for contextual theory questions
+            context["candidate_info"] = {
+                "resume": application.ai_analysis if application.ai_analysis else "No resume data available",
+            }
+
         return json.dumps(context)

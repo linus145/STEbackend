@@ -86,6 +86,7 @@ class LLMThinkView(APIView):
         action_history = request.data.get("action_history", [])
         iteration = request.data.get("iteration", 1)
         user_response = request.data.get("user_response", None)
+        original_goal = request.data.get("original_goal", None)
 
         if not goal:
             return Response(
@@ -103,6 +104,7 @@ class LLMThinkView(APIView):
                 action_history=action_history,
                 iteration=iteration,
                 user_response=user_response,
+                original_goal=original_goal,
             )
 
             return Response(action, status=status.HTTP_200_OK)

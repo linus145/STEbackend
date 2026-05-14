@@ -15,6 +15,7 @@ class InterviewMetadataView(APIView, ResponseMixin):
             "designations": [{"value": k, "label": v} for k, v in InterviewRound.DESIGNATION_CHOICES],
             "strategy_tiers": [{"value": k, "label": v} for k, v in InterviewSession.STRATEGY_TIER_CHOICES],
             "difficulty_levels": [{"value": k, "label": v} for k, v in InterviewSession.EVALUATION_DEPTH_CHOICES],
+            "round_categories": [{"value": k, "label": v} for k, v in InterviewRound.ROUND_CATEGORY_CHOICES],
             "question_formats": [{"value": k, "label": v} for k, v in InterviewRound.QUESTION_FORMAT_CHOICES],
             "programming_languages": [{"value": k, "label": v} for k, v in InterviewRound.PROGRAMMING_LANGUAGE_CHOICES if k],
         }

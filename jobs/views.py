@@ -195,7 +195,9 @@ class JobApplicationsView(ListAPIView, ResponseMixin):
 
     def get_queryset(self):
         qs = JobApplication.objects.filter(
-            job_id=self.kwargs["job_id"], is_deleted=False
+            job_id=self.kwargs["job_id"], 
+            job__status="ACTIVE",
+            is_deleted=False
         ).select_related("applicant")
         status_filter = self.request.query_params.get("status")
         if status_filter:
