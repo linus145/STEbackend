@@ -3,6 +3,7 @@ from django.db.models import Count, Q
 from .models import JobPost, JobApplication, AppliedJob
 from typing import Dict, Any, List
 
+
 class JobService:
     @staticmethod
     def get_active_jobs(filters: Dict[str, Any] = None):
@@ -10,12 +11,11 @@ class JobService:
         Retrieves active jobs with optimized application counts and prefetching.
         """
         jobs = JobPost.objects.filter(status="ACTIVE").select_related("company")
-        
+
         # Optimize application count using annotation instead of per-item count()
         jobs = jobs.annotate(
             applications_count=Count(
-                "applications", 
-                filter=Q(applications__is_deleted=False)
+                "applications", filter=Q(applications__is_deleted=False)
             )
         )
 
@@ -29,11 +29,11 @@ class JobService:
             if filters.get("search"):
                 search = filters["search"]
                 jobs = jobs.filter(
-                    Q(title__icontains=search) | 
-                    Q(description__icontains=search) | 
-                    Q(company__company_name__icontains=search)
+                    Q(title__icontains=search)
+                    | Q(description__icontains=search)
+                    | Q(company__company_name__icontains=search)
                 )
-        
+
         return jobs.order_by("-created_at")
 
     @staticmethod
@@ -42,7 +42,9 @@ class JobService:
         Retrieves all jobs for a specific company with optimized counts.
         """
         jobs = company.job_posts.filter(is_deleted=False).annotate(
-            applications_count=Count("applications", filter=Q(applications__is_deleted=False))
+            applications_count=Count(
+                "applications", filter=Q(applications__is_deleted=False)
+            )
         )
         if status:
             jobs = jobs.filter(status=status)
@@ -54,6 +56,7 @@ class JobService:
         Handles job application logic, including restoration of soft-deleted ones.
         """
         from django.shortcuts import get_object_or_404
+
         job = get_object_or_404(JobPost, id=job_id, status="ACTIVE")
 
         if hasattr(user, "company_profile") and job.company == user.company_profile:
@@ -61,23 +64,30 @@ class JobService:
 
         with transaction.atomic():
             # Create/Restore application
-            existing_app = JobApplication.all_objects.filter(job=job, applicant=user).first()
+            existing_app = JobApplication.all_objects.filter(
+                job=job, applicant=user
+            ).first()
             application = None
-            
+
             # If resume_url is not in validated_data, try to get it from profile
-            resume_url = validated_data.get('resume_url')
+            resume_url = validated_data.get("resume_url")
             if not resume_url:
-                if hasattr(user, 'founder_profile') and user.founder_profile.resume_url:
+                if hasattr(user, "founder_profile") and user.founder_profile.resume_url:
                     resume_url = user.founder_profile.resume_url
-                elif hasattr(user, 'investor_profile') and user.investor_profile.resume_url:
+                elif (
+                    hasattr(user, "investor_profile")
+                    and user.investor_profile.resume_url
+                ):
                     resume_url = user.investor_profile.resume_url
-                elif hasattr(user, 'mentor_profile') and user.mentor_profile.resume_url:
+                elif hasattr(user, "mentor_profile") and user.mentor_profile.resume_url:
                     resume_url = user.mentor_profile.resume_url
-            
+
             if not resume_url:
-                raise ValueError("No resume found. Please update your profile or provide a resume URL.")
-                
-            validated_data['resume_url'] = resume_url
+                raise ValueError(
+                    "No resume found. Please update your profile or provide a resume URL."
+                )
+
+            validated_data["resume_url"] = resume_url
 
             if existing_app:
                 if not existing_app.is_deleted:
@@ -88,16 +98,18 @@ class JobService:
                 existing_app.save()
                 application = existing_app
             else:
-                application = JobApplication.objects.create(job=job, applicant=user, **validated_data)
-            
+                application = JobApplication.objects.create(
+                    job=job, applicant=user, **validated_data
+                )
+
             # Log application snapshot in AppliedJob table
             AppliedJob.objects.create(
                 job_id=str(job.id),
                 job_name=job.title,
                 resume_url=resume_url,
-                applicant_id=str(user.id)
+                applicant_id=str(user.id),
             )
-            
+
             return application
 
     @staticmethod
@@ -110,19 +122,19 @@ class JobService:
 
         # Combine multiple counts into a single DB hit per table
         job_stats = jobs_qs.aggregate(
-            total_jobs=Count('id'),
-            active_jobs=Count('id', filter=Q(status="ACTIVE")),
-            draft_jobs=Count('id', filter=Q(status="DRAFT")),
-            closed_jobs=Count('id', filter=Q(status="CLOSED"))
+            total_jobs=Count("id"),
+            active_jobs=Count("id", filter=Q(status="ACTIVE")),
+            draft_jobs=Count("id", filter=Q(status="DRAFT")),
+            closed_jobs=Count("id", filter=Q(status="CLOSED")),
         )
 
         app_stats = apps_qs.aggregate(
-            total_applications=Count('id'),
-            pending_applications=Count('id', filter=Q(status="PENDING")),
-            reviewed=Count('id', filter=Q(status="REVIEWED")),
-            shortlisted=Count('id', filter=Q(status="SHORTLISTED")),
-            rejected=Count('id', filter=Q(status="REJECTED")),
-            hired=Count('id', filter=Q(status="HIRED"))
+            total_applications=Count("id"),
+            pending_applications=Count("id", filter=Q(status="PENDING")),
+            reviewed=Count("id", filter=Q(status="REVIEWED")),
+            shortlisted=Count("id", filter=Q(status="SHORTLISTED")),
+            rejected=Count("id", filter=Q(status="REJECTED")),
+            hired=Count("id", filter=Q(status="HIRED")),
         )
 
         return {**job_stats, **app_stats}

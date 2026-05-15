@@ -39,12 +39,12 @@ class AIScreeningHistoryView(APIView):
 
     def get(self, request):
         # Only show reports for jobs that are currently ACTIVE
-        active_job_ids = JobPost.objects.filter(company=request.user.company_profile, status="ACTIVE", is_deleted=False).values_list('id', flat=True)
+        active_job_ids = JobPost.objects.filter(
+            company=request.user.company_profile, status="ACTIVE", is_deleted=False
+        ).values_list("id", flat=True)
         reports = AIScreeningReport.objects.filter(
-            recruiter=request.user, 
-            is_deleted=False,
-            job_id__in=active_job_ids
-        ).order_by('-created_at')
+            recruiter=request.user, is_deleted=False, job_id__in=active_job_ids
+        ).order_by("-created_at")
         serializer = AIScreeningReportSerializer(reports, many=True)
         return Response(
             {
@@ -169,10 +169,12 @@ class AnalyzeResumesView(APIView, ResponseMixin):
             },
         )
 
-        # FAST STATUS UPDATE: Update all targeted apps to REVIEWED immediately 
+        # FAST STATUS UPDATE: Update all targeted apps to REVIEWED immediately
         # so the agent can see the state change without waiting for the AI thread.
         # This prevents sync delays for the autonomous agent.
-        JobApplication.objects.filter(id__in=app_ids, status="PENDING").update(status="REVIEWED")
+        JobApplication.objects.filter(id__in=app_ids, status="PENDING").update(
+            status="REVIEWED"
+        )
 
         # 4. Background Thread Logic
         def run_screening_background(job_id, user_id, app_ids, report_id):
@@ -330,16 +332,23 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                     top_candidate = all_scored.first()
                     # Only promote if they have a decent score (e.g., > 60)
                     if top_candidate.ai_score and top_candidate.ai_score >= 60:
-                        print(f"[AI] Auto-promoting top candidate {top_candidate.applicant.email} (Score: {top_candidate.ai_score}) to INTERVIEW.")
+                        print(
+                            f"[AI] Auto-promoting top candidate {top_candidate.applicant.email} (Score: {top_candidate.ai_score}) to INTERVIEW."
+                        )
                         top_candidate.status = "INTERVIEW"
                         top_candidate.save()
-                        
+
                         # Trigger orchestration for the interview session
                         try:
-                            from AIrounds.services.orchestrator import InterviewOrchestrator
+                            from AIrounds.services.orchestrator import (
+                                InterviewOrchestrator,
+                            )
+
                             InterviewOrchestrator.auto_orchestrate(top_candidate)
                         except Exception as e:
-                            print(f"[AI] Auto-orchestration failed for top candidate: {e}")
+                            print(
+                                f"[AI] Auto-orchestration failed for top candidate: {e}"
+                            )
 
             except Exception as e:
                 print(f"Background Screening Critical Error: {e}")

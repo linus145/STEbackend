@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from startups.models import CompanyProfile
 from AIAgents.services import AIAgentService
 
+
 class AgentTaskExecuteView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -15,63 +16,75 @@ class AgentTaskExecuteView(APIView):
         if task_type == "post_job" or task_type == "agentic_job_post":
             user = request.user
             prompt = payload.get("prompt", "Post a job for a Software Engineer")
-            
+
             try:
                 company = CompanyProfile.objects.get(owner=user)
             except CompanyProfile.DoesNotExist:
-                return Response({"status": "error", "message": "Company profile not found."}, status=400)
+                return Response(
+                    {"status": "error", "message": "Company profile not found."},
+                    status=400,
+                )
 
             try:
                 job = AIAgentService.execute_job_post(company, prompt)
-                
-                return Response({
-                    "status": "success",
-                    "message": f"Agent successfully drafted and published the {job.title} position.",
-                    "details": {
-                        "job_id": str(job.id),
-                        "job_title": job.title,
-                        "platforms_posted": ["B2linq Network"],
-                        "agent_notes": "AI optimized the job description and automatically matched the required skills."
+
+                return Response(
+                    {
+                        "status": "success",
+                        "message": f"Agent successfully drafted and published the {job.title} position.",
+                        "details": {
+                            "job_id": str(job.id),
+                            "job_title": job.title,
+                            "platforms_posted": ["B2linq Network"],
+                            "agent_notes": "AI optimized the job description and automatically matched the required skills.",
+                        },
                     }
-                })
+                )
             except Exception as e:
                 traceback.print_exc()
-                return Response({
-                    "status": "error",
-                    "message": f"Agent failed to execute task: {str(e)}"
-                }, status=500)
+                return Response(
+                    {
+                        "status": "error",
+                        "message": f"Agent failed to execute task: {str(e)}",
+                    },
+                    status=500,
+                )
 
         elif task_type == "schedule_interview":
             candidate_id = payload.get("candidate_id")
             details = AIAgentService.execute_schedule_interview(candidate_id)
-            return Response({
-                "status": "success",
-                "message": "Interview scheduling emails sent via AI Agent.",
-                "details": details
-            })
+            return Response(
+                {
+                    "status": "success",
+                    "message": "Interview scheduling emails sent via AI Agent.",
+                    "details": details,
+                }
+            )
         elif task_type == "talent_search":
             query = payload.get("query", "")
             try:
                 results = AIAgentService.execute_talent_search(query, request.user)
-                return Response({
-                    "status": "success",
-                    "message": "AI successfully analyzed your query and found matching talent.",
-                    "details": results
-                })
+                return Response(
+                    {
+                        "status": "success",
+                        "message": "AI successfully analyzed your query and found matching talent.",
+                        "details": results,
+                    }
+                )
             except Exception as e:
                 traceback.print_exc()
-                return Response({
-                    "status": "error",
-                    "message": f"Agent failed to execute talent search: {str(e)}"
-                }, status=500)
+                return Response(
+                    {
+                        "status": "error",
+                        "message": f"Agent failed to execute talent search: {str(e)}",
+                    },
+                    status=500,
+                )
         elif task_type == "get_search_history":
             history = AIAgentService.get_talent_search_history(request.user)
-            return Response({
-                "status": "success",
-                "details": history
-            })
+            return Response({"status": "success", "details": history})
         else:
-            return Response({
-                "status": "error",
-                "message": f"Unknown task type: {task_type}"
-            }, status=400)
+            return Response(
+                {"status": "error", "message": f"Unknown task type: {task_type}"},
+                status=400,
+            )

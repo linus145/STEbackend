@@ -30,7 +30,11 @@ class ResponseMixin:
         self, status_msg, message, data=None, status_code=status.HTTP_200_OK
     ):
         return Response(
-            {"status": status_msg, "message": message, "data": data if data is not None else {}},
+            {
+                "status": status_msg,
+                "message": message,
+                "data": data if data is not None else {},
+            },
             status=status_code,
         )
 
@@ -195,9 +199,7 @@ class JobApplicationsView(ListAPIView, ResponseMixin):
 
     def get_queryset(self):
         qs = JobApplication.objects.filter(
-            job_id=self.kwargs["job_id"], 
-            job__status="ACTIVE",
-            is_deleted=False
+            job_id=self.kwargs["job_id"], job__status="ACTIVE", is_deleted=False
         ).select_related("applicant")
         status_filter = self.request.query_params.get("status")
         if status_filter:
@@ -215,18 +217,19 @@ class UpdateApplicationStatusView(APIView, ResponseMixin):
             application, data=request.data, partial=True
         )
         if serializer.is_valid():
-            new_status = serializer.validated_data.get('status')
+            new_status = serializer.validated_data.get("status")
             serializer.save()
-            
+
             # If moved to INTERVIEW, auto-orchestrate the AI session
-            if new_status == 'INTERVIEW':
+            if new_status == "INTERVIEW":
                 try:
                     from AIrounds.services.orchestrator import InterviewOrchestrator
+
                     InterviewOrchestrator.auto_orchestrate(application)
                 except Exception as e:
                     # Log error but don't fail the status update
                     print(f"Auto-orchestration failed: {e}")
-            
+
             return self.build_response(
                 "success", "Status updated.", JobApplicationSerializer(application).data
             )
@@ -298,7 +301,10 @@ class SkillListView(APIView, ResponseMixin):
                 "success", "Skill created.", serializer.data, status.HTTP_201_CREATED
             )
         return self.build_response(
-            "error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST
+            "error",
+            "Validation failed.",
+            serializer.errors,
+            status.HTTP_400_BAD_REQUEST,
         )
 
 
@@ -317,26 +323,32 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         from AI.models import AIScreeningReport
 
         # 1. Validate AI Configuration
+
+
 # ─── Talent Pipeline Views ──────────────────────────────────────────
+
 
 class SaveToPipelineView(APIView, ResponseMixin):
     """
     POST: Save a talent (user) to the recruiter's company pipeline.
     """
+
     permission_classes = (IsAuthenticated, IsCompanyOwner)
 
     def post(self, request):
         talent_id = request.data.get("talent_id")
         if not talent_id:
-            return self.build_response("error", "Talent ID is required.", {}, status.HTTP_400_BAD_REQUEST)
+            return self.build_response(
+                "error", "Talent ID is required.", {}, status.HTTP_400_BAD_REQUEST
+            )
 
         from django.contrib.auth import get_user_model
+
         User = get_user_model()
         talent = get_object_or_404(User, id=talent_id)
 
         pipeline_entry = TalentPipeline.all_objects.filter(
-            company=request.user.company_profile,
-            talent=talent
+            company=request.user.company_profile, talent=talent
         ).first()
 
         if pipeline_entry:
@@ -347,19 +359,24 @@ class SaveToPipelineView(APIView, ResponseMixin):
                     pipeline_entry.notes = request.data.get("notes")
                 pipeline_entry.save()
             else:
-                return self.build_response("error", "Talent is already in your pipeline.", {}, status.HTTP_400_BAD_REQUEST)
+                return self.build_response(
+                    "error",
+                    "Talent is already in your pipeline.",
+                    {},
+                    status.HTTP_400_BAD_REQUEST,
+                )
         else:
             pipeline_entry = TalentPipeline.objects.create(
                 company=request.user.company_profile,
                 talent=talent,
-                notes=request.data.get("notes", "")
+                notes=request.data.get("notes", ""),
             )
 
         return self.build_response(
-            "success", 
-            "Talent saved to pipeline.", 
+            "success",
+            "Talent saved to pipeline.",
             TalentPipelineSerializer(pipeline_entry).data,
-            status.HTTP_201_CREATED
+            status.HTTP_201_CREATED,
         )
 
 
@@ -367,14 +384,14 @@ class TalentPipelineListView(ListAPIView, ResponseMixin):
     """
     GET: List all talents in the recruiter's company pipeline.
     """
+
     permission_classes = (IsAuthenticated, IsCompanyOwner)
     serializer_class = TalentPipelineSerializer
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         return TalentPipeline.objects.filter(
-            company=self.request.user.company_profile,
-            is_deleted=False
+            company=self.request.user.company_profile, is_deleted=False
         ).select_related("talent")
 
     def list(self, request, *args, **kwargs):
@@ -385,7 +402,9 @@ class TalentPipelineListView(ListAPIView, ResponseMixin):
             return self.get_paginated_response(serializer.data)
 
         serializer = self.get_serializer(queryset, many=True)
-        return self.build_response("success", "Pipeline talents fetched.", serializer.data)
+        return self.build_response(
+            "success", "Pipeline talents fetched.", serializer.data
+        )
 
 
 class TalentPipelineDetailView(APIView, ResponseMixin):
@@ -393,17 +412,29 @@ class TalentPipelineDetailView(APIView, ResponseMixin):
     PATCH: Update a talent pipeline entry (status/notes).
     DELETE: Remove a talent from the pipeline.
     """
+
     permission_classes = (IsAuthenticated, IsCompanyOwner)
 
     def patch(self, request, entry_id):
-        entry = get_object_or_404(TalentPipeline, id=entry_id, company=request.user.company_profile)
+        entry = get_object_or_404(
+            TalentPipeline, id=entry_id, company=request.user.company_profile
+        )
         serializer = TalentPipelineSerializer(entry, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return self.build_response("success", "Pipeline updated.", serializer.data)
-        return self.build_response("error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST)
+        return self.build_response(
+            "error",
+            "Validation failed.",
+            serializer.errors,
+            status.HTTP_400_BAD_REQUEST,
+        )
 
     def delete(self, request, entry_id):
-        entry = get_object_or_404(TalentPipeline, id=entry_id, company=request.user.company_profile)
+        entry = get_object_or_404(
+            TalentPipeline, id=entry_id, company=request.user.company_profile
+        )
         entry.delete()
-        return self.build_response("success", "Removed from pipeline.", {}, status.HTTP_204_NO_CONTENT)
+        return self.build_response(
+            "success", "Removed from pipeline.", {}, status.HTTP_204_NO_CONTENT
+        )

@@ -136,6 +136,7 @@ urlpatterns = [
     path("api/organization/", include("organization.urls")),
     path("api/payroll/", include("payroll.urls")),
     path("api/performance/", include("performance.urls")),
+    path("api/search/", include("searchfilters.urls")),
 ]
 from django.conf import settings
 from django.conf.urls.static import static
