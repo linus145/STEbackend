@@ -68,3 +68,29 @@ class ProctoringReportView(APIView):
             return Response(serializer.data)
         except ProctoringSession.DoesNotExist:
             return Response({"status": "error", "message": "No proctoring data found for this session."}, status=status.HTTP_404_NOT_FOUND)
+
+
+class CodeExecutionView(APIView):
+    """
+    Secure code execution endpoint for the Exam Coding Environment.
+    Runs candidate code on the server via sandboxed subprocess.
+    Uses the server's own Python (with Pandas, NumPy, etc.).
+    """
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        source_code = request.data.get('source_code', '')
+        language = request.data.get('language', 'python')
+        stdin = request.data.get('stdin', '')
+
+        if not source_code.strip():
+            return Response({
+                'stdout': '',
+                'stderr': 'No code provided.',
+                'success': False,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        from .code_executor import execute_code
+        result = execute_code(source_code, language, stdin)
+
+        return Response(result, status=status.HTTP_200_OK)

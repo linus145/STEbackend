@@ -249,7 +249,7 @@ class CandidateCompleteExamView(APIView, ResponseMixin):
         link.completed_at = timezone.now()
         link.save(update_fields=['status', 'completed_at'])
 
-        link.session.status = 'COMPLETED'
+        link.session.status = 'EVALUATING'
         link.session.save(update_fields=['status'])
 
         # Count answered questions

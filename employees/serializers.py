@@ -33,6 +33,9 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'employee_id': {'required': False, 'allow_blank': True}
+        }
 
 class EmployeeDetailSerializer(EmployeeSerializer):
     emergency_contacts = EmergencyContactSerializer(many=True, read_only=True)

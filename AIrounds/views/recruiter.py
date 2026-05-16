@@ -425,6 +425,7 @@ class SessionDetailView(APIView, ResponseMixin):
                 "status": session.status,
                 "overall_score": session.overall_score,
                 "created_at": session.created_at.isoformat(),
+                "application_id": str(session.application.id) if session.application else None,
                 "rounds": rounds_data,
                 "exam_link": exam_info,
             },

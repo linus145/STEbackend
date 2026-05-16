@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 def handle_employee_sync_on_status_change(sender, instance, created, **kwargs):
     """
     Manages the Employee record based on JobApplication status.
-    - 'HIRED': Creates or restores the Employee record.
+    - 'ONBOARDED': Creates or restores the Employee record.
     - Other status: Deletes the Employee record if it was previously created from this application.
     """
     try:
-        # Case 1: Status is HIRED -> Create/Update Employee
-        if instance.status == "HIRED":
+        # Case 1: Status is ONBOARDED -> Create/Restore Employee
+        if instance.status == "ONBOARDED":
             applicant = instance.applicant
             job = instance.job
             company_profile = job.company
@@ -47,24 +47,34 @@ def handle_employee_sync_on_status_change(sender, instance, created, **kwargs):
             }
             emp_type = type_map.get(instance.employment_type, "FULL_TIME")
 
-            employee, emp_created = Employee.objects.get_or_create(
-                job_application=instance,
-                defaults={
-                    "startup": startup,
-                    "organization": organization,
-                    "user": applicant,
-                    "employee_id": f"EMP-{uuid.uuid4().hex[:6].upper()}",
-                    "first_name": applicant.first_name or "New",
-                    "last_name": applicant.last_name or "Employee",
-                    "email": applicant.email,
-                    "joining_date": timezone.now().date(),
-                    "employment_type": emp_type,
-                    "status": "ON_BOARDING",
-                    "avatar": company_profile.logo_url,
-                },
-            )
+            # 3. Get or Create Employee by User (OneToOneField constraint)
+            employee = Employee.all_objects.filter(user=applicant).first()
 
-            if emp_created:
+            if employee:
+                # Ensure existing employee is linked correctly and active
+                if employee.is_deleted:
+                    employee.is_deleted = False
+                    employee.deleted_at = None
+                employee.status = "ON_BOARDING"
+                employee.job_application = instance
+                employee.save()
+                logger.info(f"Restored/Updated Employee for {applicant.email}")
+            else:
+                employee = Employee.objects.create(
+                    job_application=instance,
+                    startup=startup,
+                    organization=organization,
+                    user=applicant,
+                    employee_id=None,
+                    first_name=applicant.first_name or "New",
+                    last_name=applicant.last_name or "Employee",
+                    email=applicant.email,
+                    joining_date=timezone.now().date(),
+                    employment_type=emp_type,
+                    status="ON_BOARDING",
+                    avatar=company_profile.logo_url,
+                )
+
                 # 4. Create Profile Details
                 EmployeeProfile.objects.get_or_create(
                     employee=employee, defaults={"personal_email": applicant.email}
@@ -81,10 +91,6 @@ def handle_employee_sync_on_status_change(sender, instance, created, **kwargs):
                         },
                     )
                 logger.info(f"Created Employee for {applicant.email}")
-            else:
-                # Ensure existing employee is linked correctly and active
-                employee.is_deleted = False
-                employee.save()
 
         # Case 2: Status is NOT HIRED -> Remove Employee if exists
         else:

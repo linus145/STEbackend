@@ -163,7 +163,7 @@ class JobApplication(SoftDeleteModel):
         ("SHORTLISTED", "Shortlisted"),
         ("INTERVIEW", "Interview"),
         ("REJECTED", "Rejected"),
-        ("HIRED", "Hired"),
+        ("ONBOARDED", "Onboarded"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

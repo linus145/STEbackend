@@ -134,7 +134,7 @@ class JobService:
             reviewed=Count("id", filter=Q(status="REVIEWED")),
             shortlisted=Count("id", filter=Q(status="SHORTLISTED")),
             rejected=Count("id", filter=Q(status="REJECTED")),
-            hired=Count("id", filter=Q(status="HIRED")),
+            hired=Count("id", filter=Q(status="ONBOARDED")),
         )
 
         return {**job_stats, **app_stats}

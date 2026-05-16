@@ -104,6 +104,28 @@ class Employee(SoftDeleteModel):
     def __str__(self):
         return f"{self.first_name} {self.last_name} ({self.employee_id})"
 
+    def save(self, *args, **kwargs):
+        if not self.employee_id or self.employee_id == 'TEMP-ID':
+            prefix = "EMP"
+            # Filter by startup or organization to ensure serial is per tenant
+            qs = Employee.all_objects.filter(employee_id__startswith=f"{prefix}-")
+            if self.organization:
+                qs = qs.filter(organization=self.organization)
+            elif self.startup:
+                qs = qs.filter(startup=self.startup)
+                
+            last_employee = qs.order_by('created_at').last()
+            if last_employee:
+                try:
+                    last_id_num = int(last_employee.employee_id.split('-')[1])
+                    self.employee_id = f"{prefix}-{last_id_num + 1:04d}"
+                except (IndexError, ValueError):
+                    count = qs.count()
+                    self.employee_id = f"{prefix}-{count + 1:04d}"
+            else:
+                self.employee_id = f"{prefix}-0001"
+        super().save(*args, **kwargs)
+
 class EmployeeProfile(models.Model):
     """
     Additional profile details for an employee.

@@ -9,6 +9,7 @@ class InterviewSession(models.Model):
     STATUS_CHOICES = [
         ("PENDING", "Pending"),
         ("ACTIVE", "Active"),
+        ("EVALUATING", "Evaluating"),
         ("COMPLETED", "Completed"),
         ("CANCELLED", "Cancelled"),
     ]
