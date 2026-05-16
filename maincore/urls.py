@@ -123,6 +123,7 @@ urlpatterns = [
     path("api/ai/", include("AI.urls")),
     path("api/AIInterview/", include("AIInterview.urls")),
     path("api/AIrounds/", include("AIrounds.urls")),
+    path("api/proctoring/", include("Aisecurity.urls")),
 
     #agents
     path("api/AIAgents/", include("AIAgents.urls")),

@@ -100,6 +100,7 @@ INSTALLED_APPS = [
     "AI",
     "AIInterview", 
     "AIrounds",
+    "Aisecurity",
     
     #agent
     "AIAgents",

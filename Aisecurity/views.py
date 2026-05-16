@@ -1,0 +1,70 @@
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from .models import ProctoringSession, ViolationLog
+from AIrounds.models import InterviewSession
+from .serializers import ProctoringSessionSerializer, ViolationLogSerializer
+
+class LogViolationView(APIView):
+    """
+    API for the Exam Portal to log a proctoring violation.
+    Candidates use this to report tab switches, face missing, etc.
+    """
+    permission_classes = (AllowAny,)
+
+    def post(self, request):
+        session_id = request.data.get('session_id')
+        violation_type = request.data.get('violation_type')
+        metadata = request.data.get('metadata', {})
+        severity = request.data.get('severity', 'MEDIUM')
+        
+        if not session_id or not violation_type:
+            return Response({"status": "error", "message": "session_id and violation_type are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # 1. Get or create proctoring session link
+            interview_session = InterviewSession.objects.get(id=session_id)
+            proctor_session, _ = ProctoringSession.objects.get_or_create(session=interview_session)
+            
+            # 2. Log the violation
+            violation = ViolationLog.objects.create(
+                proctoring_session=proctor_session,
+                violation_type=violation_type,
+                severity=severity,
+                metadata=metadata
+            )
+            
+            # 3. Dynamic Score Update
+            # Severity mapping
+            penalty = 5
+            if severity == 'HIGH': penalty = 15
+            elif severity == 'LOW': penalty = 2
+            
+            proctor_session.integrity_score = max(0, proctor_session.integrity_score - penalty)
+            proctor_session.save()
+            
+            return Response({
+                "status": "success", 
+                "violation_id": str(violation.id),
+                "current_integrity_score": proctor_session.integrity_score
+            }, status=status.HTTP_201_CREATED)
+            
+        except InterviewSession.DoesNotExist:
+            return Response({"status": "error", "message": "Interview session not found."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({"status": "error", "message": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ProctoringReportView(APIView):
+    """
+    API for recruiters to view the integrity report of a specific candidate.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, session_id):
+        try:
+            proctor_session = ProctoringSession.objects.select_related('session__candidate').prefetch_related('violations').get(session_id=session_id)
+            serializer = ProctoringSessionSerializer(proctor_session)
+            return Response(serializer.data)
+        except ProctoringSession.DoesNotExist:
+            return Response({"status": "error", "message": "No proctoring data found for this session."}, status=status.HTTP_404_NOT_FOUND)
