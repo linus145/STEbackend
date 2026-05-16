@@ -183,9 +183,9 @@ class InterviewEngineService:
     # Maps round designations to their specific question focus areas
     # This ensures AI generates the RIGHT kind of questions for each designation
     DESIGNATION_FOCUS = {
-        "APTITUDE_ROUND": "numerical reasoning, quantitative aptitude, logical puzzles, data interpretation, percentage/ratio/time-speed-distance problems, pattern recognition. NO coding, NO programming, NO technology questions.",
-        "LOGICAL_REASONING": "logical puzzles, syllogisms, blood relations, coding-decoding, seating arrangement, direction sense, statement-conclusion. NO coding, NO programming.",
-        "COMMUNICATION_ROUND": "verbal ability, comprehension, grammar, articulation, presentation skills, email writing, summarization. NO coding, NO programming.",
+        "APTITUDE_ROUND": "numerical reasoning, quantitative aptitude. TOPICS: Number System (Prime, divisibility, unit digits, LCM/HCF), Arithmetic (Percentages, profit/loss, SI/CI, averages, ratios, partnerships, mixtures), Time/Distance (Trains, boats, races), Work/Efficiency (Pipes, wages), Modern Math (Permutations, probability, set theory), Algebra/Geometry (Equations, AP/GP, area/volume, surface area), Data Interpretation (Bar/Pie/Line graphs, tables, caselets). NO coding, NO programming. GENERATION_RULES: Randomly pick exactly 1 subtopic per call. Dynamically generate randomized names and values. Provide 4 unique options, a step-by-step solution, and a single marked correct answer. Avoid standard textbook numbers.",
+        "LOGICAL_REASONING": "logical puzzles. TOPICS: Arrangements (Linear/Circular seating, matrix, floor puzzles), Blood Relations, Direction Sense (Shadow problems, compass), Coding-Decoding, Sequence/Series (Number/Letter series, Clocks/Calendars, Leap years), Ranking/Order, Syllogisms (Venn diagrams), Critical Reasoning (Assumptions, Cause/Effect, Arguments), Verbal Logic (Analogies, Odd-one-out), Non-Verbal (Mirror/Water images, Paper folding/cutting, Cubes/Dice, Embedded figures). NO coding, NO programming. GENERATION_RULES: Randomly pick 1 topic. For arrangements, strictly map out the logical matrix internally first to ensure there is exactly one mathematically valid solution. Do not create paradoxes.",
+        "COMMUNICATION_ROUND": "verbal ability, comprehension, grammar, articulation, presentation skills, email writing, summarization. NO coding, NO programming. GENERATION_RULES: Provide a random workplace context (e.g., dealing with an angry client, announcing a delay) and ask the candidate to draft a response or summarize a 200-word block of text.",
         "HR_SCREENING": "motivation, career goals, salary expectations, notice period, relocation, company culture fit. NO technical, NO coding.",
         "BEHAVIORAL_ROUND": "past behavior scenarios (STAR method), conflict resolution, teamwork, leadership, handling pressure. NO technical, NO coding.",
         "SITUATIONAL_ROUND": "hypothetical workplace scenarios, decision making, ethical dilemmas, priority management. NO coding.",
@@ -272,8 +272,14 @@ class InterviewEngineService:
             format_instruction = "Each question should be an open-ended text question requiring a written answer."
         
         prompt = (
-            f"Generate exactly {count} interview questions for a '{designation}' round "
+            f"Generate exactly {count} UNIQUE, DIVERSE, and NON-REPETITIVE interview questions for a '{designation}' round "
             f"at '{difficulty}' difficulty level.\n\n"
+            f"CRITICAL DIVERSITY RULES:\n"
+            f"- DO NOT repeat the same logic or theme across the pool.\n"
+            f"- If generating Aptitude, avoid always starting with 'shopkeeper' profit/loss or basic number series. "
+            f"Mix it up with Probability, Time & Work, Data Sufficiency, etc.\n"
+            f"- Each of the {count} questions MUST cover a different sub-topic within the focus area.\n"
+            f"- Ensure the questions are creative and professionally phrased.\n\n"
             f"{designation_instruction}"
             f"{category_instruction}\n\n"
             f"QUESTION FORMAT: {format_instruction}\n\n"
@@ -316,7 +322,7 @@ class InterviewEngineService:
                 response_text = AIBaseService.generate_content(
                     prompt=prompt,
                     system_instruction=system_prompt,
-                    temperature=0.7 if attempt > 0 else 0.8  # Lower temp on retry
+                    temperature=0.8 if attempt > 0 else 0.9  # Higher temp for variety
                 )
                 
                 if not response_text or not response_text.strip():
