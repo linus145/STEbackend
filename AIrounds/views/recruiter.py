@@ -117,12 +117,36 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
                 "success",
                 "AI is generating your question pool.",
                 {"task_id": celery_task.id, "status": "processing"},
-                status=status.HTTP_202_ACCEPTED,
+                status_code=status.HTTP_202_ACCEPTED,
             )
         except Exception as e:
             return self.build_response(
                 "error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class TaskStatusView(APIView, ResponseMixin):
+    """
+    Check the status of a Celery task (like question generation).
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, task_id):
+        from celery.result import AsyncResult
+        result = AsyncResult(task_id)
+        
+        response_data = {
+            "task_id": task_id,
+            "status": result.status,
+        }
+        
+        if result.ready():
+            if result.successful():
+                response_data["questions"] = result.result
+            else:
+                return self.build_response("error", str(result.result), response_data, status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        return self.build_response("success", f"Task status: {result.status}", response_data)
 
 
 class RecruiterSessionListView(APIView, ResponseMixin):
@@ -468,7 +492,7 @@ class RegenerateRoundQuestionsView(APIView, ResponseMixin):
                     "round_id": str(rnd.id),
                     "status": "processing",
                 },
-                status=status.HTTP_202_ACCEPTED,
+                status_code=status.HTTP_202_ACCEPTED,
             )
         except Exception as e:
             return self.build_response(
@@ -596,7 +620,7 @@ class EvaluateQuestionView(APIView, ResponseMixin):
                     "question_id": str(question.id),
                     "status": "processing",
                 },
-                status=status.HTTP_202_ACCEPTED,
+                status_code=status.HTTP_202_ACCEPTED,
             )
         except Exception as e:
             import logging

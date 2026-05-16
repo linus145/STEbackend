@@ -22,6 +22,7 @@ from AIrounds.views import (
     EvaluateSessionView,
     EvaluateQuestionView,
     DeleteInterviewSessionView,
+    TaskStatusView,
 )
 
 urlpatterns = [
@@ -29,6 +30,7 @@ urlpatterns = [
     path('start/', StartInterviewView.as_view(), name='start_interview'),
     path('configure/', ConfigureInterviewView.as_view(), name='configure_interview'),
     path('generate-questions/', GenerateQuestionPoolView.as_view(), name='generate_questions'),
+    path('task-status/<str:task_id>/', TaskStatusView.as_view(), name='task_status'),
     path('verify-token/<uuid:token>/', VerifyInviteTokenView.as_view(), name='verify_token'),
     path('round/<uuid:round_id>/next-question/', GetNextQuestionView.as_view(), name='next_question'),
     path('question/<uuid:question_id>/submit/', SubmitAnswerView.as_view(), name='submit_answer'),
