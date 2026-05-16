@@ -70,19 +70,19 @@ class AIService:
         content_type = response.headers.get("Content-Type", "")
         if response.status_code == 200 and "text/html" not in content_type.lower():
             print(
-                f"[AI] ✅ Downloaded from Google Drive: {file_id} ({len(response.content)} bytes)"
+                f"[AI] Downloaded from Google Drive: {file_id} ({len(response.content)} bytes)"
             )
             return response.content, None
 
         if "text/html" in content_type.lower():
-            print(f"[AI] ❌ Google Drive file is restricted: {file_id}")
+            print(f"[AI] Google Drive file is restricted: {file_id}")
             return (
                 None,
                 "Resume file is restricted on Google Drive. The file sharing must be set to 'Anyone with the link'.",
             )
 
         print(
-            f"[AI] ❌ Google Drive download failed: {file_id} (HTTP {response.status_code})"
+            f"[AI] Google Drive download failed: {file_id} (HTTP {response.status_code})"
         )
         return None, f"Google Drive download failed (HTTP {response.status_code})"
 
@@ -192,7 +192,7 @@ Return ONLY this JSON:
                 for attempt in range(1, max_retries + 1):
                     try:
                         t0 = time.time()
-                        print(f"[AI] ⚡ Calling {model_name} (Attempt {attempt})...")
+                        print(f"[AI] Calling {model_name} (Attempt {attempt})...")
                         
                         response = client.models.generate_content(
                             model=model_name,
@@ -207,7 +207,7 @@ Return ONLY this JSON:
                         if response and response.text:
                             content = response.text
                             elapsed = time.time() - t0
-                            print(f"[AI] ✅ {model_name} response received in {elapsed:.1f}s")
+                            print(f"[AI] {model_name} response received in {elapsed:.1f}s")
                             
                             score, analysis = AIService._parse_response(content)
                             if score is not None:
@@ -219,7 +219,7 @@ Return ONLY this JSON:
                             
                     except Exception as e:
                         last_error = str(e)
-                        print(f"[AI] ⚠️ {model_name} failed: {last_error}")
+                        print(f"[AI] {model_name} failed: {last_error}")
                         # Exponential backoff for rate limits
                         if "429" in last_error or "Quota" in last_error:
                             sleep_time = 2 * attempt

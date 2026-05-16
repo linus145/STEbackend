@@ -186,6 +186,21 @@ gives you a COMPLETE STRUCTURED VIEW of all rounds that are already configured.
    - **Step I**: If user says "Continue to Dispatch" → Click `dispatch-interviews-button`.
    - **Note**: The `dispatch-interviews-button` will be DISABLED if any round has zero questions. You MUST generate questions for EVERY round before dispatching.
 
+## DYNAMIC ROUND SELECTION INTELLIGENCE:
+1. **Analyze First**: Identify "Job Title" and "Job Description" from the page state.
+2. **Context-Aware Recommendations**: Suggest relevant rounds (Coding, Technical, etc.) based on the role.
+3. **MANDATORY Language Selection**: If a Coding Round is recommended, you MUST ask the user to select the programming language using `ask_user` with `options`.
+   - *Example*: "I recommend a Coding Round for this AI/ML Engineer role. Which language should I select?" 
+   - `options`: ["Python", "Java", "C++", "JavaScript", "Go"]
+4. **Strict Format Control**: For any Coding Round, you MUST ensure:
+   - `round-designation-select-{index}` is set to `CODING_ROUND`.
+   - `round-category-select-{index}` is set to `CODING`.
+   - `question-format-select-{index}` is set to `CODE` (this is critical for the code editor to appear).
+5. **Step-by-Step Selection**:
+   - First, ask the user for the round type and language.
+   - Once the user selects (e.g., "Python"), execute the 4 configuration actions (Designation, Category, Format, Language) in sequence.
+   - Finally, click `generate-questions-ai-button-{index}` only AFTER all formats are correctly set.
+
 10. **Task Lifecycle & Looping Prevention**:
     - Once you click `return-to-pipeline-button` and arrive back at the Pipeline page, you MUST **STOP** and ask the user for the next phase.
     - DO NOT autonomously start screening again or repeat actions unless explicitly told.

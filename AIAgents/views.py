@@ -25,30 +25,21 @@ class AgentTaskExecuteView(APIView):
                     status=400,
                 )
 
-            try:
-                job = AIAgentService.execute_job_post(company, prompt)
+            from AIAgents.tasks import task_execute_job_post
 
-                return Response(
-                    {
-                        "status": "success",
-                        "message": f"Agent successfully drafted and published the {job.title} position.",
-                        "details": {
-                            "job_id": str(job.id),
-                            "job_title": job.title,
-                            "platforms_posted": ["B2linq Network"],
-                            "agent_notes": "AI optimized the job description and automatically matched the required skills.",
-                        },
-                    }
-                )
-            except Exception as e:
-                traceback.print_exc()
-                return Response(
-                    {
-                        "status": "error",
-                        "message": f"Agent failed to execute task: {str(e)}",
+            celery_task = task_execute_job_post.delay(company.id, prompt)
+
+            return Response(
+                {
+                    "status": "success",
+                    "message": "AI Agent has started drafting the job position in the background.",
+                    "task_id": celery_task.id,
+                    "details": {
+                        "agent_notes": "AI is currently optimizing the job description and matching skills. You can track progress via task history."
                     },
-                    status=500,
-                )
+                },
+                status=202,
+            )
 
         elif task_type == "schedule_interview":
             candidate_id = payload.get("candidate_id")
@@ -60,26 +51,24 @@ class AgentTaskExecuteView(APIView):
                     "details": details,
                 }
             )
+
         elif task_type == "talent_search":
             query = payload.get("query", "")
-            try:
-                results = AIAgentService.execute_talent_search(query, request.user)
-                return Response(
-                    {
-                        "status": "success",
-                        "message": "AI successfully analyzed your query and found matching talent.",
-                        "details": results,
-                    }
-                )
-            except Exception as e:
-                traceback.print_exc()
-                return Response(
-                    {
-                        "status": "error",
-                        "message": f"Agent failed to execute talent search: {str(e)}",
+            from AIAgents.tasks import task_execute_talent_search
+
+            celery_task = task_execute_talent_search.delay(query, request.user.id)
+
+            return Response(
+                {
+                    "status": "success",
+                    "message": "AI Agent is analyzing your query and searching for matching talent.",
+                    "task_id": celery_task.id,
+                    "details": {
+                        "agent_notes": "Searching across the platform for the best fits. Results will appear in your search history shortly."
                     },
-                    status=500,
-                )
+                },
+                status=202,
+            )
         elif task_type == "get_search_history":
             history = AIAgentService.get_talent_search_history(request.user)
             return Response({"status": "success", "details": history})

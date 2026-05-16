@@ -883,7 +883,10 @@ The response must remain structured, deterministic, and ATS-friendly.
                     {"type": "ask_user", "message": msg, "context": "interview_setup"}
                 ]
 
-            return [
+            is_coding = "coding" in user_goal
+            
+            # Initial navigation and setup steps
+            plan = [
                 {"type": "status", "message": "Navigating to Interview Pipeline..."},
                 {"type": "click", "selector": "nav-more-button"},
                 {"type": "wait", "duration": 1000},
@@ -913,12 +916,25 @@ The response must remain structured, deterministic, and ATS-friendly.
                     "optional": True,
                 },
                 {"type": "wait", "duration": 2000},
-                # Ask user before generating questions (they may already exist)
-                {
-                    "type": "ask_user",
-                    "message": "I'm now in the Architecture step. Should I generate new AI questions for this interview? (yes/no)",
-                },
             ]
+
+            # Specialized logic for the Architecture phase - Suggest based on context
+            if is_coding:
+                # Ask user for specific configuration instead of assuming Python
+                plan.append({
+                    "type": "ask_user",
+                    "message": "I've reached the Architecture step. Based on the job title/description, I recommend a Coding Round. Which programming language should I set up (Python, JavaScript, etc.), or would you prefer a different round type?",
+                    "options": ["Setup Python Coding Round", "Setup JavaScript Coding Round", "Technical Screening Only", "Add More Rounds"]
+                })
+            else:
+                # Standard verification for non-coding workflows
+                plan.append({
+                    "type": "ask_user",
+                    "message": "I'm now in the Architecture step. Based on the role, should I add a Technical round or proceed to generate questions?",
+                    "options": ["Add Technical Screening", "Add HR Round", "Generate Questions for current setup"]
+                })
+                
+            return plan
 
         # Advanced Hiring Workflow / Autonomous Loop
         # Match if goal contains keywords OR just a raw UUID

@@ -101,7 +101,9 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
             )
 
         try:
-            questions = InterviewEngineService.generate_question_pool(
+            from AIrounds.tasks import task_generate_question_pool
+
+            celery_task = task_generate_question_pool.delay(
                 application_id,
                 round_type,
                 designation,
@@ -112,12 +114,12 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
                 count,
             )
             return self.build_response(
-                "success", "Questions generated.", {"questions": questions}
+                "success",
+                "AI is generating your question pool.",
+                {"task_id": celery_task.id, "status": "processing"},
+                status=status.HTTP_202_ACCEPTED,
             )
         except Exception as e:
-            import traceback
-
-            traceback.print_exc()
             return self.build_response(
                 "error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR
             )
@@ -454,56 +456,19 @@ class RegenerateRoundQuestionsView(APIView, ResponseMixin):
         count = request.data.get("count", rnd.max_questions or 5)
 
         try:
-            # Get application_id from the round's session
-            application_id = str(rnd.session.application.id)
+            from AIrounds.tasks import task_regenerate_round_questions
 
-            # Generate new questions
-            questions = InterviewEngineService.generate_question_pool(
-                application_id,
-                rnd.round_type or rnd.designation,
-                rnd.designation,
-                rnd.difficulty,
-                rnd.question_format,
-                rnd.programming_language,
-                count,
-            )
-
-            # Delete old questions
-            rnd.questions.all().delete()
-
-            # Create new questions
-            new_questions = []
-            for q_data in questions:
-                # Handle both string (fallback) and dict (new format)
-                if isinstance(q_data, dict):
-                    q_text = q_data.get("question")
-                    q_ideal = q_data.get("ideal_answer")
-                else:
-                    q_text = q_data
-                    q_ideal = None
-
-                q = InterviewQuestion.objects.create(
-                    round=rnd,
-                    question_text=q_text,
-                    ideal_answer=q_ideal,
-                    question_type=rnd.question_format or "TEXT",
-                )
-                new_questions.append(
-                    {
-                        "id": str(q.id),
-                        "question_text": q.question_text,
-                        "ideal_answer": q.ideal_answer,
-                        "question_type": q.question_type,
-                    }
-                )
+            celery_task = task_regenerate_round_questions.delay(str(rnd.id), count)
 
             return self.build_response(
                 "success",
-                f"{len(new_questions)} questions regenerated.",
+                "AI has started regenerating questions for this round.",
                 {
+                    "task_id": celery_task.id,
                     "round_id": str(rnd.id),
-                    "questions": new_questions,
+                    "status": "processing",
                 },
+                status=status.HTTP_202_ACCEPTED,
             )
         except Exception as e:
             return self.build_response(
@@ -615,7 +580,9 @@ class EvaluateQuestionView(APIView, ResponseMixin):
             )
 
         try:
-            eval_data = InterviewEngineService.evaluate_answer(
+            from AIrounds.tasks import task_evaluate_answer
+
+            celery_task = task_evaluate_answer.delay(
                 str(question.round.session.id),
                 str(question.round.id),
                 str(question.id),
@@ -623,12 +590,13 @@ class EvaluateQuestionView(APIView, ResponseMixin):
             )
             return self.build_response(
                 "success",
-                "Question evaluated.",
+                "AI is evaluating the candidate's answer.",
                 {
+                    "task_id": celery_task.id,
                     "question_id": str(question.id),
-                    "evaluation": eval_data,
-                    "already_evaluated": False,
+                    "status": "processing",
                 },
+                status=status.HTTP_202_ACCEPTED,
             )
         except Exception as e:
             import logging
