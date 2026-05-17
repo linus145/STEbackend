@@ -23,6 +23,7 @@ class InterviewNotifier:
             Notification.objects.create(
                 recipient=candidate,
                 notification_type='INTERVIEW_INVITE',
+                dashboard='INTERVIEW',
                 message=f"You have been invited to an AI Interview for the {session.job_title} position. Please complete it before {session.expires_at.strftime('%Y-%m-%d')}.",
             )
             logger.info(f"Created in-app notification for {candidate.email}")

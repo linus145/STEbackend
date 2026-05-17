@@ -25,3 +25,11 @@ class AgentRunRequestSerializer(serializers.Serializer):
     task_type = serializers.CharField(max_length=50, required=False)
     job_id = serializers.CharField(max_length=100, required=False)
     target_count = serializers.IntegerField(required=False, default=5)
+
+
+from Ahrmagent1.models import AgentChatHistory
+
+class AgentChatHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AgentChatHistory
+        fields = ['id', 'sender', 'text', 'timestamp']

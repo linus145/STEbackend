@@ -11,9 +11,11 @@ from rest_framework.views import APIView
 
 from jobs.models import JobApplication, JobPost
 
+from django.conf import settings
+from google.genai import types
 from AI.models import AIScreeningReport
 from AI.serializers import AIScreeningReportSerializer
-from AI.services import AIService
+from AI.services import AIService, _get_client
 
 User = get_user_model()
 
@@ -206,3 +208,84 @@ class DeleteScreeningReportView(APIView, ResponseMixin):
             return self.build_response(
                 "error", "Report not found.", {}, status.HTTP_404_NOT_FOUND
             )
+
+
+class AIPlanChatView(APIView, ResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        user_message = request.data.get("message", "").strip()
+        history = request.data.get("history", [])
+
+        if not user_message:
+            return self.build_response("error", "Message is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        api_key = getattr(settings, "GEMINI_API_KEY", None)
+        if not api_key:
+            # Standalone fallback hiring strategy
+            fallback_text = (
+                "I have compiled a custom hiring strategy for you:\n\n"
+                "1. Target matches on GitHub and LinkedIn with active profiles.\n"
+                "2. Filter candidates based on required technical skill matrices.\n"
+                "3. Send invitation rounds using AI Interviews.\n\n"
+                "Let me know if you would like me to configure specific questions!"
+            )
+            return self.build_response("success", "Reply generated (Fallback).", {"reply": fallback_text})
+
+        try:
+            client = _get_client(api_key)
+
+            # Build authentic system instruction with strict character limit
+            system_instruction = (
+                "You are an expert autonomous recruiter & hiring campaign planner. "
+                "CRITICAL REQUIREMENT: Your output must be highly concise, direct, and strictly under 500 characters in total length. "
+                "Avoid excessively long pleasantries. Be authentic, natural, and extremely brief. Do not exceed 500 characters."
+            )
+
+            # Format history
+            contents = []
+            for item in history:
+                role = "user" if item.get("sender") == "user" else "model"
+                contents.append(
+                    types.Content(
+                        role=role,
+                        parts=[types.Part.from_text(text=item.get("text", ""))]
+                    )
+                )
+
+            # Add current user message
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=user_message)]
+                )
+            )
+
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    max_output_tokens=150,  # Limits token footprint to strict character boundary (~125-150 tokens)
+                    temperature=0.7,
+                ),
+            )
+
+            if response and response.text:
+                # Enforce absolute 500 character constraint on string slicing
+                reply = response.text[:500].strip()
+            else:
+                reply = "I couldn't process that. Let's try formulating another strategy!"
+
+            return self.build_response("success", "Reply generated.", {"reply": reply})
+
+        except Exception as e:
+            print(f"[AI Chat] Error: {e}")
+            fallback_text = (
+                "I have compiled a custom hiring strategy for you:\n\n"
+                "1. Target matches on GitHub and LinkedIn with active profiles.\n"
+                "2. Filter candidates based on required technical skill matrices.\n"
+                "3. Send invitation rounds using AI Interviews.\n\n"
+                "Let me know if you would like me to configure specific questions!"
+            )
+            return self.build_response("success", "Reply generated (Fallback on error).", {"reply": fallback_text})

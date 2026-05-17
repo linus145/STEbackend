@@ -280,12 +280,16 @@ class LLMVisionPlanner:
                 text = el.get("text", "")[:80]
                 disabled = " [DISABLED]" if el.get("disabled") else ""
                 agent_label = f' data-agent="{agent}"' if agent else ""
-                value_label = f' value="{el.get("value", "")}"' if el.get("value") else ""
-                visible_summary += f"  <{tag}{agent_label}{value_label}{disabled}>{text}</{tag}>\n"
+                value_label = (
+                    f' value="{el.get("value", "")}"' if el.get("value") else ""
+                )
+                visible_summary += (
+                    f"  <{tag}{agent_label}{value_label}{disabled}>{text}</{tag}>\n"
+                )
                 # Include options for select elements
                 if el.get("options"):
                     for opt in el["options"]:
-                        visible_summary += f"    <option value=\"{opt['value']}\">{opt['text']}</option>\n"
+                        visible_summary += f'    <option value="{opt["value"]}">{opt["text"]}</option>\n'
 
         # Build existing rounds summary
         rounds_summary = ""
@@ -293,16 +297,20 @@ class LLMVisionPlanner:
         if existing_rounds:
             rounds_summary = f"\n## Existing Rounds ({len(existing_rounds)} found — THIS IS A RECONFIGURATION):\n"
             for rnd in existing_rounds:
-                q_status = f"{rnd['question_count']} questions ALREADY GENERATED" if rnd.get('has_questions') else "NO questions yet"
+                q_status = (
+                    f"{rnd['question_count']} questions ALREADY GENERATED"
+                    if rnd.get("has_questions")
+                    else "NO questions yet"
+                )
                 rounds_summary += (
                     f"  Round {rnd['index'] + 1}: {rnd.get('designation_label', rnd.get('designation', 'Unknown'))}\n"
                     f"    - Designation: {rnd.get('designation', '')}\n"
                     f"    - Strategy: {rnd.get('strategy_tier', '')} | Difficulty: {rnd.get('difficulty', '')} | Format: {rnd.get('question_format', '')}\n"
                     f"    - Questions: {q_status}\n"
                 )
-                if rnd.get('questions_preview'):
+                if rnd.get("questions_preview"):
                     rounds_summary += "    - Question previews:\n"
-                    for qp in rnd['questions_preview']:
+                    for qp in rnd["questions_preview"]:
                         rounds_summary += f"      • {qp}\n"
             rounds_summary += (
                 "\n  ⚠️ IMPORTANT: You MUST acknowledge these existing rounds to the user BEFORE taking any action.\n"
@@ -315,12 +323,16 @@ class LLMVisionPlanner:
         if pipeline_candidates:
             pipeline_summary = f"\n## Pipeline Candidates ({len(pipeline_candidates)} total — YOU MUST SHOW ALL OF THEM):\n"
             for c in pipeline_candidates:
-                action_type = "Reconfigure" if c.get('is_orchestrated') else "Configure"
-                creds_status = "✅ Has exam credentials" if c.get('has_exam_credentials') else "❌ No credentials"
+                action_type = "Reconfigure" if c.get("is_orchestrated") else "Configure"
+                creds_status = (
+                    "✅ Has exam credentials"
+                    if c.get("has_exam_credentials")
+                    else "❌ No credentials"
+                )
                 pipeline_summary += (
-                    f"  [{c['index']}] \"{c['candidate_name']}\" — {c['job_title']}\n"
+                    f'  [{c["index"]}] "{c["candidate_name"]}" — {c["job_title"]}\n'
                     f"       Status: {c['status']} | Rounds: {c['rounds_count']} | Action: {action_type} | {creds_status}\n"
-                    f"       → To click their button: use selector \"configure-interview-button\" (row index {c['index']})\n"
+                    f'       → To click their button: use selector "configure-interview-button" (row index {c["index"]})\n'
                 )
             pipeline_summary += (
                 "\n  ⚠️ CRITICAL: When asking the user which candidate to configure, you MUST list ALL candidates above.\n"

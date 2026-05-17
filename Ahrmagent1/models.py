@@ -32,3 +32,17 @@ class AgentLog(models.Model):
 
     def __str__(self):
         return f"[{self.level}] {self.message[:50]}"
+
+
+from django.contrib.auth import get_user_model
+User = get_user_model()
+
+class AgentChatHistory(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
+    sender = models.CharField(max_length=10, choices=[('user', 'User'), ('bot', 'Bot')])
+    text = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.sender}: {self.text[:50]}"

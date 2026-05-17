@@ -36,13 +36,34 @@ class AgentRunView(APIView):
 
 class AgentExecutionDetailView(APIView):
     """
-    API View to get details of a specific execution.
+    API View to get details of a specific execution, update it or delete it.
     """
+    permission_classes = [AllowAny]
+
     def get(self, request, pk):
         try:
             execution = AgentExecution.objects.get(pk=pk)
             serializer = AgentExecutionSerializer(execution)
             return Response(serializer.data)
+        except AgentExecution.DoesNotExist:
+            return Response({"error": "Execution not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def put(self, request, pk):
+        try:
+            execution = AgentExecution.objects.get(pk=pk)
+            serializer = AgentExecutionSerializer(execution, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except AgentExecution.DoesNotExist:
+            return Response({"error": "Execution not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, pk):
+        try:
+            execution = AgentExecution.objects.get(pk=pk)
+            execution.delete()
+            return Response({"status": "success", "message": "Execution deleted successfully."}, status=status.HTTP_200_OK)
         except AgentExecution.DoesNotExist:
             return Response({"error": "Execution not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -120,3 +141,65 @@ class LLMThinkView(APIView):
                 },
                 status=status.HTTP_200_OK  # Still return 200 so the agent loop doesn't crash
             )
+
+
+from Ahrmagent1.models import AgentChatHistory
+from Ahrmagent1.serializers import AgentChatHistorySerializer
+
+class AgentExecutionListView(APIView):
+    """
+    API View to get all historical agent executions (Autonomous mode history).
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        executions = AgentExecution.objects.all().order_by('-started_at')
+        serializer = AgentExecutionSerializer(executions, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = AgentExecutionSerializer(data=request.data)
+        if serializer.is_valid():
+            execution = serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AgentChatHistoryView(APIView):
+    """
+    API View to retrieve and save conversational AI chat history (Conversational mode history).
+    """
+    def get(self, request):
+        if request.user.is_authenticated:
+            chats = AgentChatHistory.objects.filter(user=request.user).order_by('timestamp')
+        else:
+            chats = AgentChatHistory.objects.all().order_by('timestamp')
+        serializer = AgentChatHistorySerializer(chats, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        sender = request.data.get('sender')
+        text = request.data.get('text')
+        
+        if not sender or not text:
+            return Response({"error": "sender and text are required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        chat = AgentChatHistory.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            sender=sender,
+            text=text
+        )
+        serializer = AgentChatHistorySerializer(chat)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class AgentChatHistoryClearView(APIView):
+    """
+    API View to clear conversational AI chat history.
+    """
+    def delete(self, request):
+        if request.user.is_authenticated:
+            AgentChatHistory.objects.filter(user=request.user).delete()
+        else:
+            AgentChatHistory.objects.all().delete()
+        return Response({"status": "success", "message": "Chat history cleared."})
