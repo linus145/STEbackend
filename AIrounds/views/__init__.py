@@ -1,5 +1,5 @@
 from .base import ResponseMixin
 from .metadata import InterviewMetadataView
 from .candidate import CandidateExamAccessView, CandidateExamLoginView, CandidateSubmitAnswerView, CandidateCompleteExamView
-from .recruiter import ConfigureInterviewView, GenerateQuestionPoolView, RecruiterSessionListView, GenerateInterviewLinkView, SessionDetailView, DeleteQuestionView, RegenerateRoundQuestionsView, EvaluateSessionView, EvaluateQuestionView, DeleteInterviewSessionView, TaskStatusView
+from .recruiter import ConfigureInterviewView, GenerateQuestionPoolView, RecruiterSessionListView, GenerateInterviewLinkView, SessionDetailView, DeleteQuestionView, RegenerateRoundQuestionsView, EvaluateSessionView, EvaluateQuestionView, DeleteInterviewSessionView, TaskStatusView, ResendInviteView
 from .interview import VerifyInviteTokenView, StartInterviewView, GetNextQuestionView, SubmitAnswerView, GetRoundSummaryView, UpdateVerificationView, GenerateFinalReportView

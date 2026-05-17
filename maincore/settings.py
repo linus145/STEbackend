@@ -370,6 +370,15 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "noreply@b2linq.in")
 
+# Notification Email Configuration (lakkavaramlinus@gmail.com)
+NOTIFICATION_EMAIL_BACKEND = os.environ.get("NOTIFICATION_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+NOTIFICATION_EMAIL_HOST = os.environ.get("NOTIFICATION_EMAIL_HOST", "smtp-relay.brevo.com")
+NOTIFICATION_EMAIL_PORT = int(os.environ.get("NOTIFICATION_EMAIL_PORT", 587))
+NOTIFICATION_EMAIL_USE_TLS = os.environ.get("NOTIFICATION_EMAIL_USE_TLS", "True").lower() == "true"
+NOTIFICATION_EMAIL_HOST_USER = os.environ.get("NOTIFICATION_EMAIL_HOST_USER", "")
+NOTIFICATION_EMAIL_HOST_PASSWORD = os.environ.get("NOTIFICATION_EMAIL_HOST_PASSWORD", "")
+NOTIFICATION_DEFAULT_FROM_EMAIL = os.environ.get("NOTIFICATION_DEFAULT_FROM_EMAIL", "lakkavaramlinus@gmail.com")
+
 # AI & External APIs
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 

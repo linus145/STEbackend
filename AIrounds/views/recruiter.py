@@ -37,10 +37,7 @@ class ConfigureInterviewView(APIView, ResponseMixin):
                 application_id, overall_config, rounds_config
             )
 
-            # Step 5: Send Invitation
-            InterviewNotifier.notify_candidate_of_invite(session)
-
-            # Step 6: Auto-generate candidate exam link
+            # Step 5: Auto-generate candidate exam link and credentials
             from AIrounds.models import CandidateInterviewLink
             from datetime import timedelta
             from django.utils import timezone
@@ -49,6 +46,9 @@ class ConfigureInterviewView(APIView, ResponseMixin):
                 session=session,
                 defaults={"expires_at": timezone.now() + timedelta(hours=72)},
             )
+
+            # Step 6: Send Invitation
+            InterviewNotifier.notify_candidate_of_invite(session)
 
             from django.conf import settings as django_settings
 
@@ -205,6 +205,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                     {
                         "id": str(s.id),
                         "candidate_name": f"{s.candidate.first_name} {s.candidate.last_name}",
+                        "candidate_email": s.candidate.email,
                         "job_title": s.job_title,
                         "job_id": str(s.application.job.id)
                         if s.application and s.application.job
@@ -235,6 +236,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                     {
                         "id": f"pending_{app.id}",
                         "candidate_name": f"{app.applicant.first_name} {app.applicant.last_name}",
+                        "candidate_email": app.applicant.email,
                         "job_title": app.job.title,
                         "job_id": str(app.job.id),
                         "status": "READY_TO_ORCHESTRATE",
@@ -700,6 +702,52 @@ class DeleteInterviewSessionView(APIView, ResponseMixin):
             session.delete()
             return self.build_response(
                 "success", "Interview session deleted. Application data preserved.", {}
+            )
+        except InterviewSession.DoesNotExist:
+            return self.build_response(
+                "error", "Session not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return self.build_response(
+                "error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ResendInviteView(APIView, ResponseMixin):
+    """
+    Recruiter requests to resend the AI interview invitation email to the candidate.
+    """
+
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, session_id):
+        try:
+            session = InterviewSession.objects.select_related("candidate", "application__job__company").get(id=session_id)
+            
+            # Verify recruiter company owns the session
+            from startups.models import CompanyProfile
+
+            try:
+                company = CompanyProfile.objects.get(owner=request.user)
+                if session.application and session.application.job.company != company:
+                    return self.build_response(
+                        "error", "Unauthorized.", {}, status.HTTP_403_FORBIDDEN
+                    )
+            except CompanyProfile.DoesNotExist:
+                return self.build_response(
+                    "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+                )
+
+            # Send the invite email
+            from AIrounds.services.notifier import InterviewNotifier
+            
+            success = InterviewNotifier.notify_candidate_of_invite(session)
+            if success:
+                return self.build_response(
+                    "success", "Invitation email resent successfully.", {}
+                )
+            return self.build_response(
+                "error", "Failed to send email.", {}, status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         except InterviewSession.DoesNotExist:
             return self.build_response(

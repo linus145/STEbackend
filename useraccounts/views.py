@@ -543,19 +543,59 @@ class RecruiterContactView(APIView, RequestResponseMixin):
         # 2. Send Email
         if send_email:
             try:
+                from django.template.loader import render_to_string
+                from django.core.mail import get_connection
+
                 subject = (
-                    f"Message from {request.user.first_name or 'a Recruiter'} via STE"
+                    f"Message from {request.user.first_name or 'a Recruiter'} via B2LINQ"
                 )
-                # Fallback if DEFAULT_FROM_EMAIL is not set
-                from_email = getattr(
-                    settings, "DEFAULT_FROM_EMAIL", "noreply@b2linq.in"
+
+                # Fetch recruiter's company profile
+                company_name = "B2LINQ Partner"
+                try:
+                    from startups.models import CompanyProfile
+                    company = CompanyProfile.objects.get(owner=request.user)
+                    if company.name:
+                        company_name = company.name
+                except Exception:
+                    pass
+
+                # Render premium direct message HTML template
+                context = {
+                    "candidate_name": target_user.first_name if target_user.first_name else "Professional",
+                    "recruiter_name": request.user.first_name or "a Recruiter",
+                    "company_name": company_name,
+                    "message_content": message_content,
+                    "portal_url": getattr(settings, "FRONTEND_URL", "http://localhost:3000"),
+                }
+                html_body = render_to_string("AIrounds/emails/direct_message.html", context)
+
+                # Dynamically fetch the notification connection settings
+                backend = getattr(settings, "NOTIFICATION_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+                host = getattr(settings, "NOTIFICATION_EMAIL_HOST", "smtp-relay.brevo.com")
+                port = int(getattr(settings, "NOTIFICATION_EMAIL_PORT", 587))
+                username = getattr(settings, "NOTIFICATION_EMAIL_HOST_USER", "")
+                password = getattr(settings, "NOTIFICATION_EMAIL_HOST_PASSWORD", "")
+                use_tls = getattr(settings, "NOTIFICATION_EMAIL_USE_TLS", True)
+                from_email = getattr(settings, "NOTIFICATION_DEFAULT_FROM_EMAIL", "lakkavaramlinus@gmail.com")
+
+                connection = get_connection(
+                    backend=backend,
+                    host=host,
+                    port=port,
+                    username=username,
+                    password=password,
+                    use_tls=use_tls,
                 )
+
                 send_mail(
                     subject,
                     message_content,
                     from_email,
                     [target_user.email],
                     fail_silently=False,
+                    connection=connection,
+                    html_message=html_body,
                 )
             except Exception as e:
                 # We still return success for the chat message even if email fails

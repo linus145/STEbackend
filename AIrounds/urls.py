@@ -23,6 +23,7 @@ from AIrounds.views import (
     EvaluateQuestionView,
     DeleteInterviewSessionView,
     TaskStatusView,
+    ResendInviteView,
 )
 
 urlpatterns = [
@@ -52,4 +53,5 @@ urlpatterns = [
     path('session/<uuid:session_id>/evaluate/', EvaluateSessionView.as_view(), name='evaluate_session'),
     path('question/<uuid:question_id>/evaluate/', EvaluateQuestionView.as_view(), name='evaluate_question'),
     path('session/<str:session_id>/delete/', DeleteInterviewSessionView.as_view(), name='delete_session'),
+    path('session/<uuid:session_id>/resend-invite/', ResendInviteView.as_view(), name='resend_invite'),
 ]
