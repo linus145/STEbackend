@@ -49,9 +49,9 @@ class InterviewNotifier:
         """
         candidate = session.candidate
         
-        # Construct the secure link (Frontend URL + token)
+        # Construct the secure link (Frontend URL + exam login portal)
         frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-        invite_link = f"{frontend_url}/interview/{session.invite_token}"
+        invite_link = f"{frontend_url}/interview/exam"
 
         # Get active exam credentials from CandidateInterviewLink
         exam_username = "Not generated yet"
