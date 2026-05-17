@@ -13,14 +13,12 @@ class InterviewNotifier:
     @staticmethod
     def notify_candidate_of_invite(session):
         """
-        Sends a high-end styled HTML email and an in-app notification to the candidate with their secure link.
+        Sends a high-end styled HTML email (via background task if Celery is available, 
+        with sync fallback) and creates an in-app notification.
         """
         candidate = session.candidate
-        # Construct the secure link (Frontend URL + token)
-        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
-        invite_link = f"{frontend_url}/interview/{session.invite_token}"
 
-        # 1. In-App Notification
+        # 1. In-App Notification (fast database insert)
         try:
             Notification.objects.create(
                 recipient=candidate,
@@ -31,6 +29,29 @@ class InterviewNotifier:
             logger.info(f"Created in-app notification for {candidate.email}")
         except Exception as e:
             logger.error(f"Failed to create in-app notification: {e}")
+
+        # 2. Dispatch Celery task for background email sending
+        try:
+            from AIrounds.tasks import task_send_interview_invite
+            task_send_interview_invite.delay(str(session.id))
+            logger.info(f"Successfully queued background Celery task to send invitation email to {candidate.email}")
+            return True
+        except Exception as e:
+            logger.warning(f"Celery queue not available, falling back to synchronous email delivery: {e}")
+            # Fallback to synchronous email delivery in the current thread if Celery is not active/configured
+            return InterviewNotifier.send_invite_email_sync(session)
+
+    @staticmethod
+    def send_invite_email_sync(session):
+        """
+        Synchronously renders and dispatches the high-fidelity HTML invitation email.
+        Can be run safely in a worker thread (Celery) or synchronously as fallback.
+        """
+        candidate = session.candidate
+        
+        # Construct the secure link (Frontend URL + token)
+        frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+        invite_link = f"{frontend_url}/interview/{session.invite_token}"
 
         # Get active exam credentials from CandidateInterviewLink
         exam_username = "Not generated yet"
@@ -43,7 +64,7 @@ class InterviewNotifier:
         except Exception:
             pass
 
-        # 2. Email Invitation
+        # Email Invitation
         try:
             subject = f"Interview Invitation: {session.job_title}"
             
@@ -74,6 +95,7 @@ Hiring Team @ B2LINQ
             # Render premium custom HTML template
             context = {
                 "candidate_name": candidate.first_name if candidate.first_name else "Candidate",
+                "candidate_email": candidate.email,
                 "job_title": session.job_title,
                 "invite_link": invite_link,
                 "exam_username": exam_username,
@@ -110,8 +132,7 @@ Hiring Team @ B2LINQ
                 html_message=html_body,
             )
             logger.info(f"Sent interview invite email to {candidate.email} using notification account")
+            return True
         except Exception as e:
             logger.error(f"Failed to send invite email: {e}")
             return False
-
-        return True

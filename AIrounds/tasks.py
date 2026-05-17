@@ -74,3 +74,18 @@ def task_evaluate_answer(session_id, round_id, question_id, answer_text):
     except Exception as e:
         logger.error(f"Error in task_evaluate_answer: {e}")
         raise e
+
+@shared_task
+def task_send_interview_invite(session_id):
+    """
+    Celery task to send an interview invitation email in the background.
+    """
+    try:
+        from AIrounds.models import InterviewSession
+        from AIrounds.services.notifier import InterviewNotifier
+        session = InterviewSession.objects.select_related('candidate').get(id=session_id)
+        success = InterviewNotifier.send_invite_email_sync(session)
+        return f"Invite email task completed. Success: {success}"
+    except Exception as e:
+        logger.error(f"Error in task_send_interview_invite for session {session_id}: {e}")
+        raise e
