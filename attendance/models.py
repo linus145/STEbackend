@@ -12,12 +12,24 @@ class Shift(SoftDeleteModel):
     startup = models.ForeignKey(
         'startups.Startup', 
         on_delete=models.CASCADE, 
-        related_name='shifts'
+        related_name='shifts',
+        null=True,
+        blank=True
+    )
+    organization = models.ForeignKey(
+        'organization.Organization',
+        on_delete=models.CASCADE,
+        related_name='shifts',
+        null=True,
+        blank=True
     )
     name = models.CharField(max_length=255)
     start_time = models.TimeField()
     end_time = models.TimeField()
     break_duration = models.IntegerField(default=60, help_text="Break duration in minutes")
+    grace_period = models.IntegerField(default=15, help_text="Grace period in minutes")
+    min_hours_full_day = models.DecimalField(max_digits=4, decimal_places=2, default=8.00)
+    min_hours_half_day = models.DecimalField(max_digits=4, decimal_places=2, default=4.00)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -42,7 +54,16 @@ class Attendance(SoftDeleteModel):
     startup = models.ForeignKey(
         'startups.Startup', 
         on_delete=models.CASCADE, 
-        related_name='attendance_records'
+        related_name='attendance_records',
+        null=True,
+        blank=True
+    )
+    organization = models.ForeignKey(
+        'organization.Organization',
+        on_delete=models.CASCADE,
+        related_name='attendance_records',
+        null=True,
+        blank=True
     )
     employee = models.ForeignKey(
         'employees.Employee',
@@ -54,6 +75,7 @@ class Attendance(SoftDeleteModel):
     
     # Calculated fields
     total_work_hours = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    overtime_hours = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     is_late = models.BooleanField(default=False)
     
     created_at = models.DateTimeField(auto_now_add=True)

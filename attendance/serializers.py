@@ -6,7 +6,7 @@ class ShiftSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shift
         fields = '__all__'
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'startup', 'organization']
 
 class WorkSessionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,7 +22,7 @@ class AttendanceSerializer(serializers.ModelSerializer):
         model = Attendance
         fields = [
             'id', 'startup', 'employee', 'employee_detail', 'date', 
-            'status', 'total_work_hours', 'is_late', 'sessions', 
+            'status', 'total_work_hours', 'overtime_hours', 'is_late', 'sessions', 
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

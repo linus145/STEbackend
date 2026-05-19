@@ -263,9 +263,15 @@ class ProfileView(APIView, RequestResponseMixin):
 
 class CookieTokenRefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
-        refresh_token = request.COOKIES.get(
-            settings.SIMPLE_JWT.get("AUTH_COOKIE_REFRESH", "refresh_token")
-        )
+        # 1. Try reading the employee-specific refresh cookie first
+        is_employee = "employee_refresh_token" in request.COOKIES
+        refresh_token = request.COOKIES.get("employee_refresh_token")
+
+        # 2. Fallback to standard refresh cookie
+        if not refresh_token:
+            refresh_token = request.COOKIES.get(
+                settings.SIMPLE_JWT.get("AUTH_COOKIE_REFRESH", "refresh_token")
+            )
 
         if not refresh_token:
             # No refresh cookie → controlled 401, no crash
@@ -274,6 +280,9 @@ class CookieTokenRefreshView(TokenRefreshView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
             _delete_auth_cookies(response)
+            if is_employee:
+                from employees.views import _delete_employee_auth_cookies
+                _delete_employee_auth_cookies(response)
             return response
 
         # Safely copy request data natively to avoid immutability issues
@@ -291,6 +300,9 @@ class CookieTokenRefreshView(TokenRefreshView):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
             _delete_auth_cookies(response)
+            if is_employee:
+                from employees.views import _delete_employee_auth_cookies
+                _delete_employee_auth_cookies(response)
             return response
 
         access_token = serializer.validated_data.get("access")
@@ -301,27 +313,31 @@ class CookieTokenRefreshView(TokenRefreshView):
             status=status.HTTP_200_OK,
         )
 
-        jwt_settings = settings.SIMPLE_JWT
-        response.set_cookie(
-            key=jwt_settings["AUTH_COOKIE"],
-            value=access_token,
-            expires=jwt_settings["ACCESS_TOKEN_LIFETIME"],
-            secure=jwt_settings["AUTH_COOKIE_SECURE"],
-            httponly=jwt_settings["AUTH_COOKIE_HTTP_ONLY"],
-            samesite=jwt_settings["AUTH_COOKIE_SAMESITE"],
-            path=jwt_settings.get("AUTH_COOKIE_PATH", "/"),
-        )
-
-        if refresh_token_new:
+        if is_employee:
+            from employees.views import _set_employee_auth_cookies
+            _set_employee_auth_cookies(response, access_token, refresh_token_new or refresh_token)
+        else:
+            jwt_settings = settings.SIMPLE_JWT
             response.set_cookie(
-                key=jwt_settings["AUTH_COOKIE_REFRESH"],
-                value=refresh_token_new,
-                expires=jwt_settings["REFRESH_TOKEN_LIFETIME"],
+                key=jwt_settings["AUTH_COOKIE"],
+                value=access_token,
+                expires=jwt_settings["ACCESS_TOKEN_LIFETIME"],
                 secure=jwt_settings["AUTH_COOKIE_SECURE"],
                 httponly=jwt_settings["AUTH_COOKIE_HTTP_ONLY"],
                 samesite=jwt_settings["AUTH_COOKIE_SAMESITE"],
                 path=jwt_settings.get("AUTH_COOKIE_PATH", "/"),
             )
+
+            if refresh_token_new:
+                response.set_cookie(
+                    key=jwt_settings["AUTH_COOKIE_REFRESH"],
+                    value=refresh_token_new,
+                    expires=jwt_settings["REFRESH_TOKEN_LIFETIME"],
+                    secure=jwt_settings["AUTH_COOKIE_SECURE"],
+                    httponly=jwt_settings["AUTH_COOKIE_HTTP_ONLY"],
+                    samesite=jwt_settings["AUTH_COOKIE_SAMESITE"],
+                    path=jwt_settings.get("AUTH_COOKIE_PATH", "/"),
+                )
 
         return response
 
@@ -568,7 +584,7 @@ class RecruiterContactView(APIView, RequestResponseMixin):
                     "message_content": message_content,
                     "portal_url": getattr(settings, "FRONTEND_URL", "http://localhost:3000"),
                 }
-                html_body = render_to_string("AIrounds/emails/direct_message.html", context)
+                html_body = render_to_string("emails/direct_message.html", context)
 
                 # Dynamically fetch the notification connection settings
                 backend = getattr(settings, "NOTIFICATION_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")

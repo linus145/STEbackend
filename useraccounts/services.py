@@ -36,7 +36,16 @@ class UserService:
     def authenticate_user(email: str, password: str) -> User:
         """
         Validates login credentials seamlessly. Returns user or None.
+        Supports standard email OR custom employee portal_username.
         """
+        from employees.models import Employee
+        try:
+            employee = Employee.objects.filter(portal_username__iexact=email).first()
+            if employee and employee.user:
+                email = employee.user.email
+        except Exception as e:
+            print(f"Error resolving portal_username in auth: {e}")
+
         return authenticate(email=email, password=password)
 
     @staticmethod

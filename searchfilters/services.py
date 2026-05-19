@@ -159,3 +159,59 @@ class SearchService:
             "news": cls.search_news({"search": search_query})[:limit],
             "users": cls.search_users({"search": search_query})[:limit],
         }
+
+    @staticmethod
+    def filter_employees(queryset, filters: Dict[str, Any] = None):
+        """
+        Unified service in the searchfilters app for searching, filtering, and ordering employee querysets.
+        """
+        if not filters:
+            return queryset.order_by("-created_at")
+
+        # Basic text search
+        search_query = filters.get("search")
+        if search_query:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search_query)
+                | Q(last_name__icontains=search_query)
+                | Q(email__icontains=search_query)
+                | Q(employee_id__icontains=search_query)
+            )
+
+        # Standard filters
+        if filters.get("status"):
+            queryset = queryset.filter(status=filters["status"])
+        if filters.get("employment_type"):
+            queryset = queryset.filter(employment_type=filters["employment_type"])
+        if filters.get("department"):
+            queryset = queryset.filter(department_id=filters["department"])
+        if filters.get("designation"):
+            queryset = queryset.filter(designation_id=filters["designation"])
+
+        # Date range
+        joining_date__gte = filters.get("joining_date__gte")
+        if joining_date__gte:
+            queryset = queryset.filter(joining_date__gte=joining_date__gte)
+        joining_date__lte = filters.get("joining_date__lte")
+        if joining_date__lte:
+            queryset = queryset.filter(joining_date__lte=joining_date__lte)
+
+        # Ordering
+        ordering = filters.get("ordering")
+        if ordering:
+            allowed_orderings = [
+                "joining_date",
+                "-joining_date",
+                "created_at",
+                "-created_at",
+                "salary",
+                "-salary",
+            ]
+            if ordering in allowed_orderings:
+                queryset = queryset.order_by(ordering)
+            else:
+                queryset = queryset.order_by("-created_at")
+        else:
+            queryset = queryset.order_by("-created_at")
+
+        return queryset

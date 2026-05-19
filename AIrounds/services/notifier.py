@@ -102,7 +102,7 @@ Hiring Team @ B2LINQ
                 "exam_password": exam_password,
                 "expires_at": session.expires_at.strftime("%Y-%m-%d %H:%M"),
             }
-            html_body = render_to_string("AIrounds/emails/interview_invite.html", context)
+            html_body = render_to_string("emails/interview_invite.html", context)
 
             # Dynamically fetch the notification connection settings
             backend = getattr(settings, "NOTIFICATION_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")

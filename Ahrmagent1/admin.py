@@ -1,5 +1,6 @@
 from django.contrib import admin
-from Ahrmagent1.models import AgentExecution, AgentLog
+from Ahrmagent1.models import AgentExecution, AgentLog, AgentChatHistory
+
 
 @admin.register(AgentExecution)
 class AgentExecutionAdmin(admin.ModelAdmin):
@@ -13,5 +14,13 @@ class AgentLogAdmin(admin.ModelAdmin):
     list_display = ('execution', 'level', 'timestamp')
     list_filter = ('level', 'timestamp')
     search_fields = ('execution__id', 'message')
+    readonly_fields = ('timestamp',)
+    ordering = ('-timestamp',)
+
+@admin.register(AgentChatHistory)
+class AgentChatHistoryAdmin(admin.ModelAdmin):
+    list_display = ('id', 'user', 'sender', 'timestamp')
+    list_filter = ('sender', 'timestamp')
+    search_fields = ('user__id', 'text')
     readonly_fields = ('timestamp',)
     ordering = ('-timestamp',)

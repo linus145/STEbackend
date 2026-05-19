@@ -30,6 +30,9 @@ class UserSerializer(serializers.ModelSerializer):
         elif obj.role == User.ROLE_MENTOR:
             if hasattr(obj, 'mentor_profile'):
                 data = MentorProfileSerializer(obj.mentor_profile).data
+        elif hasattr(obj, 'employee_profile'):
+            from employees.serializers import EmployeeSerializer
+            data = EmployeeSerializer(obj.employee_profile).data
         
         # Add company and HR info if available
         if hasattr(obj, 'company_profile'):

@@ -29,6 +29,12 @@ class Organization(SoftDeleteModel):
     tax_id = models.CharField(max_length=100, blank=True, help_text="e.g. GSTIN, EIN")
     address = models.TextField(blank=True)
     website = models.URLField(max_length=255, blank=True)
+    logo_url = models.URLField(max_length=500, blank=True)
+    banner_url = models.URLField(max_length=500, blank=True)
+    industry = models.CharField(max_length=150, blank=True)
+    company_size = models.CharField(max_length=50, blank=True)
+    description = models.TextField(blank=True)
+    founded_year = models.PositiveIntegerField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
