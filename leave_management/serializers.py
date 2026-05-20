@@ -7,7 +7,7 @@ class LeaveTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = LeaveType
         fields = "__all__"
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "startup", "organization", "company"]
 
 
 class LeaveRequestSerializer(serializers.ModelSerializer):
@@ -29,6 +29,8 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
             "updated_at",
             "employee",
             "startup",
+            "organization",
+            "company",
         ]
 
     def get_employee_name(self, obj):

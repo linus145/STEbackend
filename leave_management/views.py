@@ -13,6 +13,45 @@ class LeaveTypeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     queryset = LeaveType.objects.all()
     serializer_class = LeaveTypeSerializer
 
+    def perform_create(self, serializer):
+        user = self.request.user
+        
+        # 1. Employee profile context
+        employee = getattr(user, "employee_profile", None)
+        if employee:
+            serializer.save(
+                startup=employee.startup,
+                organization=employee.organization,
+                company=employee.organization.company if employee.organization else None
+            )
+            return
+
+        # 2. Founder/HR company profile context
+        company = getattr(user, "company_profile", None)
+        if company:
+            from organization.models import Organization
+            organization = Organization.objects.filter(company=company).first()
+            if not organization:
+                organization = Organization.objects.create(
+                    company=company, name=company.company_name
+                )
+            
+            from startups.models import Startup
+            startup = Startup.objects.filter(founder=user).first()
+            if not startup:
+                startup = user.startups.first()
+
+            serializer.save(
+                startup=startup,
+                organization=organization,
+                company=company
+            )
+            return
+
+        # 3. Direct startup fallback
+        startup = user.startups.first()
+        serializer.save(startup=startup)
+
 
 class LeaveRequestViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     queryset = LeaveRequest.objects.select_related("employee", "leave_type").all()
@@ -38,7 +77,12 @@ class LeaveRequestViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         employee = getattr(self.request.user, "employee_profile", None)
         if employee:
-            serializer.save(employee=employee, startup=employee.startup)
+            serializer.save(
+                employee=employee,
+                startup=employee.startup,
+                organization=employee.organization,
+                company=employee.organization.company if employee.organization else None
+            )
         else:
             serializer.save()
 

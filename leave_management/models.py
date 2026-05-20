@@ -5,22 +5,50 @@ from maincore.basemodel import SoftDeleteModel
 
 class LeaveType(SoftDeleteModel):
     """
-    Types of leave available (e.g., Annual, Sick, Casual).
+    Types of leave available (e.g., Annual, Sick, Casual, Occasional, National).
     """
+    CATEGORY_CHOICES = (
+        ('ANNUAL', 'Annual Leave'),
+        ('SICK', 'Sick Leave'),
+        ('CASUAL', 'Casual Leave'),
+        ('OCCASIONAL', 'Occasional Leave'),
+        ('NATIONAL', 'National Holiday / Leave'),
+        ('OTHER', 'Other'),
+    )
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     startup = models.ForeignKey(
         'startups.Startup', 
         on_delete=models.CASCADE, 
-        related_name='leave_types'
+        related_name='leave_types',
+        null=True,
+        blank=True
+    )
+    organization = models.ForeignKey(
+        'organization.Organization',
+        on_delete=models.CASCADE,
+        related_name='leave_types',
+        null=True,
+        blank=True
+    )
+    company = models.ForeignKey(
+        'startups.CompanyProfile',
+        on_delete=models.CASCADE,
+        related_name='leave_types',
+        null=True,
+        blank=True
     )
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='OTHER')
     is_paid = models.BooleanField(default=True)
     carry_forward = models.BooleanField(default=False)
-    max_days_per_year = models.IntegerField(default=0)
+    max_days_per_year = models.IntegerField(null=True, blank=True, default=0)
+    date = models.DateField(null=True, blank=True)
     
     def __str__(self):
-        return f"{self.name} - {self.startup.name}"
+        owner_name = self.organization.name if self.organization else (self.startup.name if self.startup else "Unknown")
+        return f"{self.name} - {owner_name}"
 
 class LeaveRequest(SoftDeleteModel):
     """
@@ -37,7 +65,23 @@ class LeaveRequest(SoftDeleteModel):
     startup = models.ForeignKey(
         'startups.Startup', 
         on_delete=models.CASCADE, 
-        related_name='leave_requests'
+        related_name='leave_requests',
+        null=True,
+        blank=True
+    )
+    organization = models.ForeignKey(
+        'organization.Organization',
+        on_delete=models.CASCADE,
+        related_name='leave_requests',
+        null=True,
+        blank=True
+    )
+    company = models.ForeignKey(
+        'startups.CompanyProfile',
+        on_delete=models.CASCADE,
+        related_name='leave_requests',
+        null=True,
+        blank=True
     )
     employee = models.ForeignKey(
         'employees.Employee',
