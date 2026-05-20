@@ -33,7 +33,7 @@ def get_app_list(self, request, app_label=None):
     # HR related apps to aggregate
     hr_app_labels = [
         "employees", "attendance", "leave_management", 
-        "organization", "payroll", "performance",
+        "organization", "performance",
         "AIAgents", "Ahrmagent1", "Ahrmagent2"
     ]
     
@@ -68,7 +68,7 @@ def get_app_list(self, request, app_label=None):
     app_list = sorted(app_dict.values(), key=lambda x: x["name"].lower())
 
     # Custom priority order
-    priority_apps = ["useraccounts", "hr_tool", "posts", "notifications", "comments"]
+    priority_apps = ["useraccounts", "hr_tool", "payroll", "posts", "notifications", "comments"]
 
     sorted_app_list = []
     # Add priority apps first

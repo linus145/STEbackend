@@ -40,11 +40,24 @@ class StartupTenantMixin:
 
         # 0. Handle Employee scoping directly
         employee = getattr(user, "employee_profile", None)
-        if employee:
+        if not employee:
+            from employees.models import Employee
+            employee = Employee.objects.filter(email=user.email).first()
+
+        # Check if they are an Admin, HR, Payroll Manager, Recruiter, Operations, or superuser:
+        is_admin_or_hr = (
+            user.is_superuser or
+            user.groups.filter(name__in=["Admin", "HR", "Payroll Manager", "Recruiter"]).exists() or
+            (employee and employee.designation and employee.designation.title.upper() in ["ADMIN", "HR", "HR MANAGER", "PAYROLL MANAGER", "OPERATIONS", "OWNER"])
+        )
+
+        if employee and not is_admin_or_hr:
             if hasattr(qs.model, "organization") and employee.organization:
                 return qs.filter(organization=employee.organization)
             elif hasattr(qs.model, "startup") and employee.startup:
                 return qs.filter(startup=employee.startup)
+            elif hasattr(qs.model, "employee"):
+                return qs.filter(employee=employee)
 
         # 1. Try to filter by Organization (via CompanyProfile) for Founders/HR/Recruiters
         company = getattr(user, "company_profile", None)
@@ -55,6 +68,16 @@ class StartupTenantMixin:
                     company=company, name=company.company_name
                 )
 
+            # Heal database model link dynamically if not associated:
+            if not organization.startup:
+                startup = user.startups.first()
+                if not startup:
+                    from startups.models import Startup
+                    startup = Startup.objects.first()
+                if startup:
+                    organization.startup = startup
+                    organization.save()
+
             from django.db.models import Q
             if hasattr(qs.model, "organization"):
                 return qs.filter(organization=organization)
@@ -62,12 +85,48 @@ class StartupTenantMixin:
                 return qs.filter(company=company)
             elif hasattr(qs.model, "employee"):
                 return qs.filter(Q(employee__organization=organization) | Q(employee__startup__founder=user))
+            elif hasattr(qs.model, "startup"):
+                startup = user.startups.first()
+                if startup:
+                    return qs.filter(startup=startup)
+                elif organization and organization.startup:
+                    return qs.filter(startup=organization.startup)
+
+        # 1.5 For Admin/HR who are registered as Employees (e.g. Operations managers, HR managers)
+        if is_admin_or_hr and employee and employee.organization:
+            organization = employee.organization
+
+            # Heal database model link dynamically if not associated:
+            if not organization.startup:
+                startup = employee.startup
+                if not startup:
+                    from startups.models import Startup
+                    startup = Startup.objects.first()
+                if startup:
+                    organization.startup = startup
+                    organization.save()
+
+            from django.db.models import Q
+            if hasattr(qs.model, "organization"):
+                return qs.filter(organization=organization)
+            elif hasattr(qs.model, "company"):
+                return qs.filter(company=organization.company)
+            elif hasattr(qs.model, "employee"):
+                return qs.filter(Q(employee__organization=organization) | Q(employee__startup__founder=user))
+            elif hasattr(qs.model, "startup"):
+                startup = employee.startup
+                if not startup:
+                    startup = organization.startup
+                if startup:
+                    return qs.filter(startup=startup)
 
         # 2. Fallback to Startup filtering
         startup = user.startups.first()
         if startup:
             if hasattr(qs.model, "startup"):
                 return qs.filter(startup=startup)
+            elif hasattr(qs.model, "employee"):
+                return qs.filter(employee__startup=startup)
 
         # 3. Last resort: return empty if no tenant found
         return qs.none()
