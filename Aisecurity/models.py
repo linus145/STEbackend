@@ -49,6 +49,7 @@ class ViolationLog(models.Model):
     )
     violation_type = models.CharField(max_length=50, choices=VIOLATION_TYPES)
     severity = models.CharField(max_length=20, default="MEDIUM")  # LOW, MEDIUM, HIGH
+    duration_seconds = models.FloatField(default=0.0)
     timestamp = models.DateTimeField(auto_now_add=True)
     metadata = models.JSONField(
         default=dict, blank=True

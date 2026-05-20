@@ -3,6 +3,9 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from AIrounds.models import InterviewQuestion, InterviewSession
 from AIrounds.views.base import ResponseMixin
+import logging
+
+logger = logging.getLogger(__name__)
 
 class CandidateExamAccessView(APIView, ResponseMixin):
     """
@@ -30,6 +33,13 @@ class CandidateExamAccessView(APIView, ResponseMixin):
         # Build rounds + questions payload
         rounds_data = []
         for rnd in session.rounds.all().order_by('created_at'):
+            if rnd.question_format == 'VIDEO' and rnd.questions.count() == 0:
+                try:
+                    from AIrounds.services.engine_service import InterviewEngineService
+                    InterviewEngineService.generate_next_question(str(session.id), str(rnd.id))
+                except Exception as e:
+                    logger.error(f"Error generating dynamic first question: {e}")
+
             questions = []
             for q in rnd.questions.all().order_by('asked_at'):
                 q_data = {
@@ -126,6 +136,13 @@ class CandidateExamLoginView(APIView, ResponseMixin):
         # Build full exam payload
         rounds_data = []
         for rnd in session.rounds.all().order_by('created_at'):
+            if rnd.question_format == 'VIDEO' and rnd.questions.count() == 0:
+                try:
+                    from AIrounds.services.engine_service import InterviewEngineService
+                    InterviewEngineService.generate_next_question(str(session.id), str(rnd.id))
+                except Exception as e:
+                    logger.error(f"Error generating dynamic first question: {e}")
+
             questions = []
             for q in rnd.questions.all().order_by('asked_at'):
                 q_data = {
@@ -213,9 +230,33 @@ class CandidateSubmitAnswerView(APIView, ResponseMixin):
         question.answered_at = timezone.now()
         question.save(update_fields=['candidate_answer', 'answered_at'])
 
+        # Generate next follow-up question dynamically if it's a VIDEO round
+        next_question_data = None
+        if question.round.question_format == 'VIDEO':
+            current_q_count = question.round.questions.count()
+            if current_q_count < question.round.max_questions:
+                try:
+                    from AIrounds.services.engine_service import InterviewEngineService
+                    InterviewEngineService.generate_next_question(
+                        str(link.session.id), 
+                        str(question.round.id)
+                    )
+                    created_q = InterviewQuestion.objects.filter(round=question.round).order_by('-asked_at').first()
+                    if created_q and created_q.id != question.id:
+                        next_question_data = {
+                            "id": str(created_q.id),
+                            "question_text": created_q.question_text,
+                            "question_type": created_q.question_type,
+                            "candidate_answer": "",
+                            "answered_at": None,
+                        }
+                except Exception as e:
+                    logger.error(f"Error generating dynamic follow-up question: {e}")
+
         return self.build_response("success", "Answer submitted.", {
             "question_id": str(question.id),
             "answered_at": question.answered_at.isoformat(),
+            "next_question": next_question_data
         })
 
 

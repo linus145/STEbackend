@@ -27,11 +27,14 @@ class LogViolationView(APIView):
             interview_session = InterviewSession.objects.get(id=session_id)
             proctor_session, _ = ProctoringSession.objects.get_or_create(session=interview_session)
             
+            duration_seconds = request.data.get('duration_seconds', metadata.get('duration_seconds', 0.0))
+
             # 2. Log the violation
             violation = ViolationLog.objects.create(
                 proctoring_session=proctor_session,
                 violation_type=violation_type,
                 severity=severity,
+                duration_seconds=float(duration_seconds),
                 metadata=metadata
             )
             
