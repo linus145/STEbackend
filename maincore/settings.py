@@ -322,7 +322,7 @@ SIMPLE_JWT = {
     "AUTH_COOKIE_SECURE": not DEBUG,
     "AUTH_COOKIE_HTTP_ONLY": True,
     "AUTH_COOKIE_PATH": "/",
-    "AUTH_COOKIE_SAMESITE": "Lax" if DEBUG else "None",
+    "AUTH_COOKIE_SAMESITE": "Lax" if DEBUG else "Strict",
 }
 
 # Nginx Reverse Proxy SSL Termination Settings
@@ -334,6 +334,9 @@ SECURE_SSL_REDIRECT = False
 
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax" if DEBUG else "Strict"
+CSRF_COOKIE_SAMESITE = "Lax" if DEBUG else "Strict"
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
