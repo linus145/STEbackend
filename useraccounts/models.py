@@ -2,7 +2,7 @@ import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.utils import timezone
-from .managers import CustomUserManager
+from useraccounts.managers import CustomUserManager
 from maincore.basemodel import SoftDeleteModel
 
 

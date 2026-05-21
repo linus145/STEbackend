@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from startups.serializers import CompanyProfileSerializer, CompanyHRProfileSerializer
 from startups.models import CompanyHRProfile
-from .models import JobPost, JobApplication, Skill, TalentPipeline
+from jobs.models import JobPost, JobApplication, Skill, TalentPipeline
 
 
 class SkillSerializer(serializers.ModelSerializer):

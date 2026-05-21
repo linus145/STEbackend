@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework import permissions
 from rest_framework.views import APIView
-from .serializers import (
+from startups.serializers import (
     StartupSerializer,
     StartupCreateUpdateSerializer,
     CompanyProfileSerializer,
@@ -12,8 +12,8 @@ from .serializers import (
     CompanyUpdateSerializer,
     CompanyLoginSerializer,
 )
-from .services import StartupService
-from .models import CompanyProfile, CompanyHRProfile
+from startups.services import StartupService
+from startups.models import CompanyProfile, CompanyHRProfile
 from useraccounts.services import UserService
 from useraccounts.serializers import UserSerializer
 from maincore.pagination import StandardResultsSetPagination

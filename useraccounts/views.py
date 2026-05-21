@@ -28,7 +28,7 @@ from startups.models import CompanyProfile
 from chat.models import ChatRoom, Message as ChatMessage
 from employees.views import _delete_employee_auth_cookies, _set_employee_auth_cookies
 
-from .serializers import (
+from useraccounts.serializers import (
     RegisterSerializer,
     LoginSerializer,
     UserSerializer,
@@ -36,9 +36,9 @@ from .serializers import (
     ChangePasswordSerializer,
     UpdatePhoneNumberSerializer,
 )
-from .services import UserService
-from .models import CustomUser, WsTicket
-from .email_service import EmailService
+from useraccounts.services import UserService
+from useraccounts.models import CustomUser, WsTicket
+from useraccounts.email_service import EmailService
 
 
 
