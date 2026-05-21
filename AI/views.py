@@ -233,13 +233,20 @@ class AIPlanChatView(APIView, ResponseMixin):
             return self.build_response("success", "Reply generated (Fallback).", {"reply": fallback_text})
 
         try:
+            from Ahrmagent1.services.llm_planner import APP_KNOWLEDGE
             client = _get_client(api_key)
 
-            # Build authentic system instruction with strict character limit
+            # Build authentic system instruction with strict character limit and application knowledge
             system_instruction = (
-                "You are an expert autonomous recruiter & hiring campaign planner. "
-                "CRITICAL REQUIREMENT: Your output must be highly concise, direct, and strictly under 500 characters in total length. "
-                "Avoid excessively long pleasantries. Be authentic, natural, and extremely brief. Do not exceed 500 characters."
+                "You are an expert conversational AI agent embedded inside an HR & Recruitment Operating System. "
+                "You are here to answer questions, explain processes, and describe settings inside this application. "
+                "Here is the knowledge about the application structure, settings, navigation, and workflows:\n"
+                f"{APP_KNOWLEDGE}\n\n"
+                "CRITICAL INSTRUCTIONS:\n"
+                "1. Answer questions about the application structure, configurations, settings (such as grace period, attendance, payroll) and workflows using the knowledge above.\n"
+                "2. Do NOT output Playwright actions or structured JSON. Answer naturally in conversational text.\n"
+                "3. Your output must be highly concise, direct, and strictly under 500 characters in total length.\n"
+                "4. Avoid excessively long pleasantries. Be authentic, natural, and extremely brief. Do not exceed 500 characters."
             )
 
             # Format history

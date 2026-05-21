@@ -63,9 +63,7 @@ A. RECRUITER SUITE (SPA with Tabbed Navigation)
     - "nav-link-interview-pipeline" → Redirects to the AI Interview Pipeline view (/recruiter/AIInterviews).
     - Link to "/Hrtools" (text "HR Tool") → Redirects to the HR Tools Suite.
   - DROPDOWN PROTECTION: If "nav-link-interview-pipeline" or "HR Tool" is ALREADY visible in the current Page State, the dropdown is ALREADY open. DO NOT click "nav-more-button" again, as clicking it a second time will toggle the dropdown closed. Just click the target link directly!
-  - NAVIGATION FAILSAFE: If the dropdown menu is slow to open or if you cannot click the links, you can IMMEDIATELY open the pipeline in a new tab by returning action type "open_new_tab" with value "/recruiter/AIInterviews". This bypasses the dropdown completely and is 100% reliable!
-
---------------------------------------------------
+  - NA--------------------------------------------------
 B. HR SUITE (SPA with Tabbed Navigation)
 --------------------------------------------------
 * Base Path: /Hrtools
@@ -73,9 +71,47 @@ B. HR SUITE (SPA with Tabbed Navigation)
   - "nav-tab-hr-dashboard" → HR metrics, general summaries, and activity lists.
   - "nav-tab-hr-onboarding" → Lifecycle onboarding, employee check-in queues, and onboarding tasks.
   - "nav-tab-hr-employees" → Employee directory, profiles, salary updates, and detail lookups.
-  - "nav-tab-hr-attendance" → Log times, review calendars, check daily check-in states.
-  - "nav-tab-hr-leave" → Leave request tables, pending requests, approval buttons.
-  - "nav-tab-hr-payroll" → Payroll statements, compensation logs, and payout profiles.
+  - Collapsible Navigation Groups:
+    - "nav-parent-attendance" → Attendance section parent button. Click to expand sub-menu tabs:
+      - "nav-tab-hr-sub-attendance-activity" → Live activity feed. Shows records list with delete action button: `attendance-delete-btn-{record.id}`.
+      - "nav-tab-hr-sub-attendance-requests" → Attendance Correction Requests. Row action buttons: `attendance-correction-approve-btn-{req.id}` and `attendance-correction-reject-btn-{req.id}`.
+      - "nav-tab-hr-sub-attendance-hour-account" → Worked hours balance sheets.
+      - "nav-tab-hr-sub-attendance-work-records" → Default daily logs.
+      - "nav-tab-hr-sub-attendance-late-early" → Late come / early out details.
+      - "nav-tab-hr-sub-attendance-settings" → Policy configurations. Form inputs:
+        - `attendance-settings-checkin` → Expected check-in time input.
+        - `attendance-settings-checkout` → Expected check-out time input.
+        - `attendance-settings-grace-period` → Grace period minutes input.
+        - `attendance-settings-full-day` → Full day threshold hours input.
+        - `attendance-settings-half-day` → Half day threshold hours input.
+        - `attendance-settings-auto-overtime` → Toggle switch for auto overtime.
+        - `attendance-settings-save-btn` → Save settings button.
+      - Quick Check-in Header (visible on all attendance pages):
+        - `attendance-quick-check-in-btn` → Clock check-in trigger button.
+        - `attendance-quick-check-out-btn` → Clock check-out trigger button.
+    - "nav-parent-leave" → Leave section parent button. Click to expand:
+      - "nav-tab-hr-sub-leave-company", "nav-tab-hr-sub-leave-requests", "nav-tab-hr-sub-leave-pending", "nav-tab-hr-sub-leave-approved".
+    - "nav-parent-payroll" → Payroll section parent button. Click to expand sub-menu tabs:
+      - "nav-tab-hr-sub-payroll-dashboard" → Payroll general metric statistics.
+      - "nav-tab-hr-sub-payroll-runs" → Manage payroll runs. Click `"payroll-start-run-btn"` to launch start-run dialog:
+        - `payroll-new-run-month-select` → Select dropdown for month.
+        - `payroll-new-run-year-select` → Select dropdown for year.
+        - `payroll-new-run-compile-btn` → Compile sheets submit button.
+        - Rows have action buttons: `payroll-rerun-btn-{run.id}`, `payroll-delete-btn-{run.id}`, and `payroll-review-sheet-btn-{run.id}`.
+        - Drilldown view actions: `payroll-back-to-logs-btn` (back), `payroll-drilldown-rerun-btn-{run.id}` (recalculate).
+      - "nav-tab-hr-sub-payroll-approvals" → Executive queue.
+        - Row actions: `payroll-approvals-review-sheet-btn-{run.id}`.
+        - Drilldown actions: `payroll-approvals-back-btn` (back), `payroll-run-approve-btn-{run.id}` (Approve & issue payslips), `payroll-run-reject-btn-{run.id}` (Reject run).
+      - "nav-tab-hr-sub-payroll-salary-structures" → Compensation profiles list.
+        - Click `"payroll-salary-add-btn"` to add profile, or `"payroll-salary-edit-btn-{profile.id}"` to modify.
+        - Form inputs: `payroll-salary-employee-id-input`, `payroll-salary-basic-salary-input`, `payroll-salary-hra-input`, `payroll-salary-ot-rate-input`, `payroll-salary-tax-percentage-input`, `payroll-salary-pf-percentage-input`, `payroll-salary-esi-percentage-input`.
+        - Submit button: `payroll-salary-modal-save-btn`.
+      - "nav-tab-hr-sub-payroll-tax-configurations" → Tax configurations list.
+        - Click `"payroll-tax-add-btn"` to add slab.
+        - Form inputs: `payroll-tax-slab-name-input`, `payroll-tax-percentage-input`, `payroll-tax-min-amount-input`, `payroll-tax-max-amount-input`.
+        - Submit button: `payroll-tax-modal-save-btn`.
+      - "nav-tab-hr-sub-payroll-reimbursements" → Expense claims list.
+        - Claims row actions: `payroll-claim-approve-btn-{claim.id}` (Approve), `payroll-claim-reject-btn-{claim.id}` (Reject).
   - "nav-tab-hr-performance" → Appraisal sheets, review cycles, and team metrics.
   - "nav-tab-hr-organization" → Company structure, divisions, departments, and corporate profiles.
 
@@ -86,6 +122,9 @@ B. HR SUITE (SPA with Tabbed Navigation)
   - "employee-first-name-input" → Input text field for the employee's First Name.
   - "employee-last-name-input" → Input text field for the employee's Last Name.
   - "employee-email-input" → Input email field for the employee's Email Address.
+  - "employee-phone-input" → Input text field for the employee's Phone Number.
+  - "employee-type-select" → Dropdown select for Employment Type. Values: 'FULL_TIME' (Permanent), 'CONTRACT' (Contract), or 'INTERN' (Intern).
+  - "employee-submit-button" → Button to submit and create the new employee.ess.
   - "employee-phone-input" → Input text field for the employee's Phone Number.
   - "employee-type-select" → Dropdown select for Employment Type. Values: 'FULL_TIME' (Permanent), 'CONTRACT' (Contract), or 'INTERN' (Intern).
   - "employee-submit-button" → Button to submit and create the new employee.
