@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>New Message - B2LINQ</title>
+  <title>New Message - {{ company_name|default:"B2LINQ" }}</title>
   <style>
     body {
       background-color: #f8fafc;
@@ -13,11 +14,13 @@
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
+
     .wrapper {
       width: 100%;
       background-color: #f8fafc;
       padding: 40px 0;
     }
+
     .container {
       max-width: 600px;
       margin: 0 auto;
@@ -27,11 +30,13 @@
       overflow: hidden;
       box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
     }
+
     .header {
       background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
       padding: 30px;
       text-align: center;
     }
+
     .logo {
       color: #ffffff;
       font-size: 24px;
@@ -40,12 +45,15 @@
       text-decoration: none;
       margin: 0;
     }
+
     .logo span {
       color: #60a5fa;
     }
+
     .content {
       padding: 40px 30px;
     }
+
     h1 {
       color: #0f172a;
       font-size: 22px;
@@ -54,6 +62,7 @@
       margin-top: 0;
       margin-bottom: 20px;
     }
+
     p {
       color: #334155;
       font-size: 16px;
@@ -61,6 +70,7 @@
       margin-top: 0;
       margin-bottom: 20px;
     }
+
     .message-quote {
       background-color: #f8fafc;
       border-left: 4px solid #2563eb;
@@ -72,10 +82,12 @@
       font-size: 15px;
       line-height: 1.6;
     }
+
     .cta-container {
       text-align: center;
       margin: 35px 0;
     }
+
     .btn {
       display: inline-block;
       background-color: #2563eb;
@@ -88,51 +100,65 @@
       box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2), 0 2px 4px -1px rgba(37, 99, 235, 0.1);
       transition: background-color 0.2s ease;
     }
+
     .btn:hover {
       background-color: #1d4ed8;
     }
+
     .footer {
       background-color: #f1f5f9;
       padding: 30px;
       text-align: center;
       border-top: 1px solid #e2e8f0;
     }
+
     .footer-text {
       color: #64748b;
       font-size: 13px;
       line-height: 1.5;
       margin: 0;
     }
+
     .footer-text a {
       color: #2563eb;
       text-decoration: none;
     }
   </style>
 </head>
+
 <body>
   <div class="wrapper">
     <div class="container">
       <div class="header">
-        <h2 class="logo">B2<span>LINQ</span></h2>
+        <h2 class="logo">
+          {% if company_name %}
+            {{ company_name }}
+          {% else %}
+            B2<span>LINQ</span>
+          {% endif %}
+        </h2>
       </div>
       <div class="content">
         <h1>Hi {{ candidate_name }},</h1>
-        <p>You have received a new inquiry from recruiter <strong>{{ recruiter_name }}</strong> regarding opportunities at <strong>{{ company_name }}</strong>.</p>
-        
+        <p>You have received a new inquiry from recruiter <strong>{{ recruiter_name }}</strong> regarding opportunities
+          at <strong>{{ company_name }}</strong>.</p>
+
         <div class="message-quote">
           "{{ message_content }}"
         </div>
-        
+
         <div class="cta-container">
-          <a href="{{ portal_url }}" class="btn">Respond on B2LINQ</a>
+          <a href="{{ portal_url }}" class="btn">Respond on {{ company_name|default:"B2LINQ" }}</a>
         </div>
- 
-        <p>Best regards,<br><strong>B2LINQ Team</strong></p>
+
+        <p>Best regards,<br><strong>{{ company_name|default:"B2LINQ" }} Team</strong></p>
       </div>
       <div class="footer">
-        <p class="footer-text">This is an automated email from the B2LINQ Autonomous Hiring OS.<br>To manage your profile or applications, visit <a href="https://b2linq.in">B2LINQ</a>.</p>
+        <p class="footer-text">This is an automated email from the {{ company_name|default:"B2LINQ" }} Autonomous Hiring OS.<br>To manage your
+          profile or applications, visit <a href="https://b2linq.in">{{ company_name|default:"B2LINQ" }}</a>.</p>
       </div>
     </div>
   </div>
 </body>
+
 </html>

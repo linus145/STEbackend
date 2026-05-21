@@ -3,7 +3,7 @@ import string
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
-from .models import CustomUser
+from useraccounts.models import CustomUser
 
 class EmailService:
     @staticmethod
@@ -19,7 +19,20 @@ class EmailService:
         user.otp_created_at = timezone.now()
         user.save(update_fields=['otp', 'otp_created_at'])
 
-        subject = "Your B2LINQ Verification Code"
+        company_name = "B2LINQ"
+        try:
+            if hasattr(user, "company_profile") and user.company_profile:
+                company_name = user.company_profile.company_name
+            elif hasattr(user, "employee_profile") and user.employee_profile:
+                emp = user.employee_profile
+                if emp.startup:
+                    company_name = emp.startup.name
+                elif emp.organization:
+                    company_name = emp.organization.name
+        except Exception:
+            pass
+
+        subject = f"Your {company_name} Verification Code"
         message = f"Hello {user.first_name or 'there'},\n\nYour verification code is: {otp}\n\nThis code will expire in 10 minutes.\n\nIf you did not request this code, please ignore this email."
         
         try:

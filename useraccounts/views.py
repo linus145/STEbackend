@@ -1,28 +1,45 @@
 from django.db import models
+from django.db.models import Count
+from django.conf import settings
+from django.shortcuts import redirect
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from django.contrib.auth import get_user_model
+from django.core.mail import send_mail, get_connection
+from django.template.loader import render_to_string
+
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
-from django.conf import settings
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework_simplejwt.exceptions import InvalidToken
+
+from google.oauth2 import id_token
+from google.auth.transport import requests
+
+from maincore.imagekit_utils import ImageKitService
+from founders.serializers import FounderUpdateSerializer
+from founders.models import Founder
+from investors.serializers import InvestorUpdateSerializer
+from investors.models import Investor
+from startups.models import CompanyProfile
+from chat.models import ChatRoom, Message as ChatMessage
+from employees.views import _delete_employee_auth_cookies, _set_employee_auth_cookies
+
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
     UserSerializer,
     LogoutSerializer,
+    ChangePasswordSerializer,
+    UpdatePhoneNumberSerializer,
 )
-from founders.serializers import FounderUpdateSerializer
-from investors.serializers import InvestorUpdateSerializer
 from .services import UserService
-from google.oauth2 import id_token
-from google.auth.transport import requests
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-from django.shortcuts import redirect
-from django.core.mail import send_mail
-from .models import CustomUser
+from .models import CustomUser, WsTicket
+from .email_service import EmailService
+
 
 
 class RequestResponseMixin:
@@ -190,13 +207,10 @@ class ProfileView(APIView, RequestResponseMixin):
 
         # Update Profile
         if profile_data:
-            from maincore.imagekit_utils import ImageKitService
 
             profile_obj = None
             if user.role == user.ROLE_FOUNDER:
                 if not hasattr(user, "founder_profile"):
-                    from founders.models import Founder
-
                     Founder.objects.create(user=user)
                 profile_obj = user.founder_profile
                 profile_serializer = FounderUpdateSerializer(
@@ -204,8 +218,6 @@ class ProfileView(APIView, RequestResponseMixin):
                 )
             elif user.role == user.ROLE_INVESTOR:
                 if not hasattr(user, "investor_profile"):
-                    from investors.models import Investor
-
                     Investor.objects.create(user=user)
                 profile_obj = user.investor_profile
                 profile_serializer = InvestorUpdateSerializer(
@@ -281,7 +293,6 @@ class CookieTokenRefreshView(TokenRefreshView):
             )
             _delete_auth_cookies(response)
             if is_employee:
-                from employees.views import _delete_employee_auth_cookies
                 _delete_employee_auth_cookies(response)
             return response
 
@@ -301,7 +312,6 @@ class CookieTokenRefreshView(TokenRefreshView):
             )
             _delete_auth_cookies(response)
             if is_employee:
-                from employees.views import _delete_employee_auth_cookies
                 _delete_employee_auth_cookies(response)
             return response
 
@@ -314,7 +324,6 @@ class CookieTokenRefreshView(TokenRefreshView):
         )
 
         if is_employee:
-            from employees.views import _set_employee_auth_cookies
             _set_employee_auth_cookies(response, access_token, refresh_token_new or refresh_token)
         else:
             jwt_settings = settings.SIMPLE_JWT
@@ -351,8 +360,6 @@ class WsTicketView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, *args, **kwargs):
-        from .models import WsTicket
-
         ticket = WsTicket.objects.create(user=request.user)
         return Response({"token": str(ticket.id)}, status=status.HTTP_200_OK)
 
@@ -361,8 +368,6 @@ class PublicProfileView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
 
     def get(self, request, user_id, *args, **kwargs):
-        from .models import CustomUser
-
         try:
             user = CustomUser.objects.get(id=user_id)
             serializer = UserSerializer(user)
@@ -382,8 +387,6 @@ class ChangePasswordView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
-        from .serializers import ChangePasswordSerializer
-
         user = request.user
         serializer = ChangePasswordSerializer(data=request.data)
         if serializer.is_valid():
@@ -412,16 +415,12 @@ class UpdatePhoneNumberView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
-        from .serializers import UpdatePhoneNumberSerializer
-
         user = request.user
         serializer = UpdatePhoneNumberSerializer(data=request.data)
         if serializer.is_valid():
             phone_number = serializer.validated_data.get("phone_number")
 
             # Check if this phone number is already registered to another user
-            from django.contrib.auth import get_user_model
-
             User = get_user_model()
             if (
                 User.objects.filter(phone_number=phone_number)
@@ -533,9 +532,6 @@ class RecruiterContactView(APIView, RequestResponseMixin):
             )
 
         # 1. Send Chat Message
-        from chat.models import ChatRoom, Message as ChatMessage
-        from django.db.models import Count
-
         # Check if a direct-type 1-to-1 room already exists between these two users
         room = (
             ChatRoom.objects.filter(
@@ -559,22 +555,23 @@ class RecruiterContactView(APIView, RequestResponseMixin):
         # 2. Send Email
         if send_email:
             try:
-                from django.template.loader import render_to_string
-                from django.core.mail import get_connection
-
-                subject = (
-                    f"Message from {request.user.first_name or 'a Recruiter'} via B2LINQ"
-                )
-
-                # Fetch recruiter's company profile
-                company_name = "B2LINQ Partner"
+                # Fetch recruiter's company profile/name dynamically
+                company_name = "Company"
                 try:
-                    from startups.models import CompanyProfile
-                    company = CompanyProfile.objects.get(owner=request.user)
-                    if company.name:
-                        company_name = company.name
+                    if hasattr(request.user, "company_profile") and request.user.company_profile:
+                        company_name = request.user.company_profile.company_name
+                    elif hasattr(request.user, "employee_profile") and request.user.employee_profile:
+                        emp = request.user.employee_profile
+                        if emp.startup:
+                            company_name = emp.startup.name
+                        elif emp.organization:
+                            company_name = emp.organization.name
                 except Exception:
                     pass
+
+                subject = (
+                    f"Message from {request.user.first_name or 'a Recruiter'} via {company_name}"
+                )
 
                 # Render premium direct message HTML template
                 context = {
@@ -637,8 +634,6 @@ class RecruiterBulkContactView(APIView, RequestResponseMixin):
                 status.HTTP_400_BAD_REQUEST,
             )
 
-        from chat.models import ChatRoom, Message as ChatMessage
-        
         success_count = 0
         failed_count = 0
 
@@ -683,7 +678,6 @@ class RequestOTPView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
 
     def post(self, request, *args, **kwargs):
-        from .email_service import EmailService
         email = request.data.get("email")
         if not email:
             return self.build_response("error", "Email is required.", {}, status.HTTP_400_BAD_REQUEST)
@@ -701,7 +695,6 @@ class VerifyOTPView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
 
     def post(self, request, *args, **kwargs):
-        from .email_service import EmailService
         email = request.data.get("email")
         otp = request.data.get("otp")
         
