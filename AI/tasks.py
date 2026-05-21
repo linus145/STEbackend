@@ -11,16 +11,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logger = logging.getLogger("ai.tasks")
 User = get_user_model()
 
-def screen_single_candidate(app_id, email, job_title, full_job_info, resume_url):
+def screen_single_candidate(app_id, email, job_title, job_brief, resume_url):
     """
     Helper function to screen a single candidate in a thread.
+    job_brief is a structured dict with all ATS criteria.
     """
     try:
-        # This log will now appear for all candidates almost simultaneously
-        logger.info(f"[AI Thread] Starting parallel screening for: {email}")
-        
+        logger.info(f"[AI Thread] Starting strict ATS screening for: {email}")
         score, analysis_json = AIService.analyze_resume(
-            job_title, full_job_info, resume_url
+            job_title, job_brief, resume_url
         )
         return app_id, score, analysis_json
     except Exception as e:
@@ -49,16 +48,34 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
 
         processed_count = 0
         errors = []
-        job_skills = ", ".join([s.name for s in job.skills.all()])
-        full_job_info = f"{job.description}\n\nREQUIRED SKILLS: {job_skills}"
+
+        # Build comprehensive structured job brief for strict ATS scoring
+        job_skills_list = [s.name for s in job.skills.all()]
+        job_brief = {
+            "description": job.description,
+            "required_skills": ", ".join(job_skills_list) if job_skills_list else "Not specified",
+            "experience_level": job.experience_level,  # ENTRY / MID / SENIOR / LEAD
+            "job_type": job.job_type,                  # FULL_TIME / PART_TIME / CONTRACT / INTERNSHIP
+            "work_mode": job.work_mode,                # REMOTE / ONSITE / HYBRID
+            "department": job.department or "",
+            "salary_min": str(job.salary_min) if job.salary_min else "",
+            "salary_max": str(job.salary_max) if job.salary_max else "",
+            "currency": job.currency or "INR",
+        }
+
+        logger.info(
+            f"[AI Task] Job brief — title='{job.title}' | level={job.experience_level} | "
+            f"skills=[{', '.join(job_skills_list[:5])}{'...' if len(job_skills_list) > 5 else ''}] | "
+            f"type={job.job_type} | mode={job.work_mode}"
+        )
 
         # 1. Parallel execution of AI analysis (The heavy I/O part)
         results_map = {}
         with ThreadPoolExecutor(max_workers=10) as executor:
             future_to_app = {
                 executor.submit(
-                    screen_single_candidate, 
-                    app.id, app.applicant.email, job.title, full_job_info, app.resume_url
+                    screen_single_candidate,
+                    app.id, app.applicant.email, job.title, job_brief, app.resume_url
                 ): app for app in apps_to_screen if app.resume_url
             }
 
@@ -137,6 +154,35 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
                 "score": cand.ai_score,
                 "summary": summary,
                 "analysis": analysis_obj,
+                # Enriched fields from world-class ATS response
+                "pipeline_disposition": (
+                    analysis_obj.get("recruiter_view", {}).get("pipeline_disposition", "")
+                    if analysis_obj else ""
+                ),
+                "knockout_applied": (
+                    analysis_obj.get("recruiter_view", {}).get("knockout_applied", False)
+                    if analysis_obj else False
+                ),
+                "knockout_reason": (
+                    analysis_obj.get("recruiter_view", {}).get("knockout_reason", "")
+                    if analysis_obj else ""
+                ),
+                "hiring_confidence": (
+                    analysis_obj.get("recruiter_view", {}).get("hiring_confidence", "")
+                    if analysis_obj else ""
+                ),
+                "recruiter_action_memo": (
+                    analysis_obj.get("recruiter_view", {}).get("recruiter_action_memo", "")
+                    if analysis_obj else ""
+                ),
+                "skills_match_pct": (
+                    analysis_obj.get("intelligence", {}).get("skills_assessment", {}).get("skills_match_percentage", 0)
+                    if analysis_obj else 0
+                ),
+                "career_level": (
+                    analysis_obj.get("intelligence", {}).get("career_summary", {}).get("career_level_assessed", "")
+                    if analysis_obj else ""
+                ),
             })
 
         report.results = {
@@ -149,19 +195,45 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
         }
         report.save()
 
-        # AUTO-PROMOTION: Move top candidate to INTERVIEW
+        # ── AUTO-PROMOTION: Use AI's own pipeline_disposition, not raw score ──
+        # Only SHORTLIST disposition (score typically ≥ 90) triggers immediate
+        # promotion to INTERVIEW + orchestration. This keeps the AI's reasoning
+        # gate in control rather than a hard numeric threshold.
         if all_scored.exists():
             top_candidate = all_scored.first()
-            if top_candidate.ai_score and top_candidate.ai_score >= 60:
-                logger.info(f"[AI Task] Auto-promoting top candidate {top_candidate.applicant.email} to INTERVIEW.")
-                top_candidate.status = "INTERVIEW"
-                top_candidate.save()
-                
+            if top_candidate.ai_score is not None:
+                disposition = ""
                 try:
-                    from AIrounds.services.orchestrator import InterviewOrchestrator
-                    InterviewOrchestrator.auto_orchestrate(top_candidate)
-                except Exception as e:
-                    logger.error(f"[AI Task] Auto-orchestration failed: {e}")
+                    if top_candidate.ai_analysis and top_candidate.ai_analysis.strip().startswith("{"):
+                        a_obj = json.loads(top_candidate.ai_analysis)
+                        disposition = a_obj.get("recruiter_view", {}).get("pipeline_disposition", "")
+                except Exception:
+                    pass
+
+                # Promote if AI says SHORTLIST OR score is exceptionally high
+                should_promote = (
+                    disposition == "SHORTLIST"
+                    or (not disposition and top_candidate.ai_score >= 80)
+                )
+
+                if should_promote:
+                    logger.info(
+                        f"[AI Task] Auto-promoting top candidate {top_candidate.applicant.email} "
+                        f"to INTERVIEW — disposition={disposition or 'N/A'}, score={top_candidate.ai_score}"
+                    )
+                    top_candidate.status = "INTERVIEW"
+                    top_candidate.save()
+
+                    try:
+                        from AIrounds.services.orchestrator import InterviewOrchestrator
+                        InterviewOrchestrator.auto_orchestrate(top_candidate)
+                    except Exception as e:
+                        logger.error(f"[AI Task] Auto-orchestration failed: {e}")
+                else:
+                    logger.info(
+                        f"[AI Task] Top candidate NOT promoted — "
+                        f"disposition={disposition or 'N/A'}, score={top_candidate.ai_score}"
+                    )
 
         return report.results
 
