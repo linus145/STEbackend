@@ -123,19 +123,83 @@ class CompanyHRProfileView(APIView, ResponseMixin):
     def get(self, request):
         if not hasattr(request.user, "company_profile"):
             return self.build_response("error", "No company profile found.", {}, status.HTTP_404_NOT_FOUND)
-        hr_profile, _ = CompanyHRProfile.objects.get_or_create(company=request.user.company_profile)
+        hr_profile = CompanyHRProfile.objects.filter(company=request.user.company_profile, is_deleted=False).first()
+        if not hr_profile:
+            hr_profile = CompanyHRProfile.objects.create(company=request.user.company_profile)
         serializer = CompanyHRProfileSerializer(hr_profile)
         return self.build_response("success", "HR profile fetched.", serializer.data)
 
     def patch(self, request):
         if not hasattr(request.user, "company_profile"):
             return self.build_response("error", "No company profile found.", {}, status.HTTP_404_NOT_FOUND)
-        hr_profile, _ = CompanyHRProfile.objects.get_or_create(company=request.user.company_profile)
+        hr_profile = CompanyHRProfile.objects.filter(company=request.user.company_profile, is_deleted=False).first()
+        if not hr_profile:
+            hr_profile = CompanyHRProfile.objects.create(company=request.user.company_profile)
         serializer = CompanyHRProfileSerializer(hr_profile, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return self.build_response("success", "HR profile updated.", serializer.data)
         return self.build_response("error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST)
+
+
+class CompanyHRProfileListCreateView(APIView, ResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        if not hasattr(request.user, "company_profile"):
+            return self.build_response("error", "No company profile found.", {}, status.HTTP_404_NOT_FOUND)
+        profiles = CompanyHRProfile.objects.filter(company=request.user.company_profile, is_deleted=False).order_by("-created_at")
+        serializer = CompanyHRProfileSerializer(profiles, many=True)
+        return self.build_response("success", "HR profiles fetched.", serializer.data)
+
+    def post(self, request):
+        if not hasattr(request.user, "company_profile"):
+            return self.build_response("error", "No company profile found.", {}, status.HTTP_404_NOT_FOUND)
+        serializer = CompanyHRProfileSerializer(data=request.data)
+        if serializer.is_valid():
+            profile = serializer.save(company=request.user.company_profile)
+            return self.build_response("success", "HR profile created.", CompanyHRProfileSerializer(profile).data, status.HTTP_201_CREATED)
+        return self.build_response("error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST)
+
+
+class CompanyHRProfileDetailView(APIView, ResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def get_object(self, request, pk):
+        if not hasattr(request.user, "company_profile"):
+            return None
+        try:
+            return CompanyHRProfile.objects.get(
+                pk=pk,
+                company=request.user.company_profile,
+                is_deleted=False
+            )
+        except CompanyHRProfile.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        profile = self.get_object(request, pk)
+        if not profile:
+            return self.build_response("error", "HR profile not found.", {}, status.HTTP_404_NOT_FOUND)
+        serializer = CompanyHRProfileSerializer(profile)
+        return self.build_response("success", "HR profile fetched.", serializer.data)
+
+    def patch(self, request, pk):
+        profile = self.get_object(request, pk)
+        if not profile:
+            return self.build_response("error", "HR profile not found.", {}, status.HTTP_404_NOT_FOUND)
+        serializer = CompanyHRProfileSerializer(profile, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return self.build_response("success", "HR profile updated.", serializer.data)
+        return self.build_response("error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        profile = self.get_object(request, pk)
+        if not profile:
+            return self.build_response("error", "HR profile not found.", {}, status.HTTP_404_NOT_FOUND)
+        profile.delete()
+        return self.build_response("success", "HR profile deleted.", {}, status.HTTP_200_OK)
 
 
 class CompanyCheckView(APIView, ResponseMixin):

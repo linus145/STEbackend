@@ -61,6 +61,7 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
             "salary_min": str(job.salary_min) if job.salary_min else "",
             "salary_max": str(job.salary_max) if job.salary_max else "",
             "currency": job.currency or "INR",
+            "job_category": job.job_category,
         }
 
         logger.info(

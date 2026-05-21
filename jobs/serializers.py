@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from startups.serializers import CompanyProfileSerializer, CompanyHRProfileSerializer
+from startups.models import CompanyHRProfile
 from .models import JobPost, JobApplication, Skill, TalentPipeline
 
 
@@ -24,7 +25,7 @@ class JobPostListSerializer(serializers.ModelSerializer):
     company_id = serializers.UUIDField(source="company.id", read_only=True)
     company_is_genuine = serializers.BooleanField(source="company.is_genuine", read_only=True)
     owner_user_id = serializers.UUIDField(source="company.owner_id", read_only=True)
-    hr_profile = CompanyHRProfileSerializer(source="company.hr_profile", read_only=True)
+    hr_profile = serializers.SerializerMethodField()
     applications_count = serializers.IntegerField(read_only=True)
     skills = SkillSerializer(many=True, read_only=True)
 
@@ -39,6 +40,7 @@ class JobPostListSerializer(serializers.ModelSerializer):
             "description",
             "location",
             "job_type",
+            "job_category",
             "work_mode",
             "salary_min",
             "salary_max",
@@ -59,6 +61,14 @@ class JobPostListSerializer(serializers.ModelSerializer):
             "created_at",
         )
 
+    def get_hr_profile(self, obj):
+        if obj.hr_profile and not obj.hr_profile.is_deleted:
+            return CompanyHRProfileSerializer(obj.hr_profile).data
+        fallback = obj.company.hr_profiles.filter(is_deleted=False).first()
+        if fallback:
+            return CompanyHRProfileSerializer(fallback).data
+        return None
+
 
 class JobPostDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer with full company info for job detail view."""
@@ -66,6 +76,7 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
     company = CompanyProfileSerializer(read_only=True)
     applications_count = serializers.IntegerField(read_only=True)
     skills = SkillSerializer(many=True, read_only=True)
+    hr_profile = serializers.SerializerMethodField()
 
     class Meta:
         model = JobPost
@@ -76,6 +87,7 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
             "description",
             "location",
             "job_type",
+            "job_category",
             "work_mode",
             "salary_min",
             "salary_max",
@@ -89,15 +101,25 @@ class JobPostDetailSerializer(serializers.ModelSerializer):
             "hiring_status",
             "deadline",
             "applications_count",
+            "hr_profile",
             "is_ai_generated",
             "created_at",
             "updated_at",
         )
 
+    def get_hr_profile(self, obj):
+        if obj.hr_profile and not obj.hr_profile.is_deleted:
+            return CompanyHRProfileSerializer(obj.hr_profile).data
+        fallback = obj.company.hr_profiles.filter(is_deleted=False).first()
+        if fallback:
+            return CompanyHRProfileSerializer(fallback).data
+        return None
+
 
 class JobPostCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating a new job post."""
     skills = serializers.PrimaryKeyRelatedField(many=True, queryset=Skill.objects.all(), required=False)
+    hr_profile = serializers.PrimaryKeyRelatedField(queryset=CompanyHRProfile.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = JobPost
@@ -106,6 +128,7 @@ class JobPostCreateSerializer(serializers.ModelSerializer):
             "description",
             "location",
             "job_type",
+            "job_category",
             "work_mode",
             "salary_min",
             "salary_max",
@@ -117,8 +140,17 @@ class JobPostCreateSerializer(serializers.ModelSerializer):
             "department",
             "status",
             "hiring_status",
+            "hr_profile",
             "deadline",
         )
+
+    def validate_hr_profile(self, value):
+        if value:
+            request = self.context.get("request")
+            if request and hasattr(request.user, "company_profile"):
+                if value.company != request.user.company_profile:
+                    raise serializers.ValidationError("HR profile does not belong to your company.")
+        return value
 
     def validate_title(self, value):
         if not value.strip():
@@ -143,6 +175,7 @@ class JobPostCreateSerializer(serializers.ModelSerializer):
 class JobPostUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating a job post — all fields optional."""
     skills = serializers.PrimaryKeyRelatedField(many=True, queryset=Skill.objects.all(), required=False)
+    hr_profile = serializers.PrimaryKeyRelatedField(queryset=CompanyHRProfile.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = JobPost
@@ -151,6 +184,7 @@ class JobPostUpdateSerializer(serializers.ModelSerializer):
             "description",
             "location",
             "job_type",
+            "job_category",
             "work_mode",
             "salary_min",
             "salary_max",
@@ -162,8 +196,17 @@ class JobPostUpdateSerializer(serializers.ModelSerializer):
             "department",
             "status",
             "hiring_status",
+            "hr_profile",
             "deadline",
         )
+
+    def validate_hr_profile(self, value):
+        if value:
+            request = self.context.get("request")
+            if request and hasattr(request.user, "company_profile"):
+                if value.company != request.user.company_profile:
+                    raise serializers.ValidationError("HR profile does not belong to your company.")
+        return value
 
     def validate(self, data):
         salary_min = data.get("salary_min", getattr(self.instance, "salary_min", None))

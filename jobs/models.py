@@ -66,6 +66,11 @@ class JobPost(SoftDeleteModel):
         ("ACTIVELY_REVIEWING", "Actively Reviewing"),
     )
 
+    JOB_CATEGORY_CHOICES = (
+        ("IT", "IT"),
+        ("NON_IT", "Non-IT"),
+    )
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(
         "startups.CompanyProfile",
@@ -105,6 +110,16 @@ class JobPost(SoftDeleteModel):
     )
     hiring_status = models.CharField(
         max_length=30, choices=HIRING_STATUS_CHOICES, default="ACTIVELY_HIRING"
+    )
+    job_category = models.CharField(
+        max_length=10, choices=JOB_CATEGORY_CHOICES, default="IT"
+    )
+    hr_profile = models.ForeignKey(
+        "startups.CompanyHRProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="job_posts",
     )
     deadline = models.DateTimeField(null=True, blank=True)
     is_ai_generated = models.BooleanField(default=False)

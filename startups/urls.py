@@ -6,6 +6,8 @@ from .views import (
     CompanyRegisterView,
     CompanyProfileView,
     CompanyHRProfileView,
+    CompanyHRProfileListCreateView,
+    CompanyHRProfileDetailView,
     CompanyCheckView,
     CompanyLoginView
 )
@@ -18,6 +20,8 @@ urlpatterns = [
     path("company/login/", CompanyLoginView.as_view(), name="company-login"),
     path("company/me/", CompanyProfileView.as_view(), name="company-profile"),
     path("company/hr-profile/", CompanyHRProfileView.as_view(), name="company-hr-profile"),
+    path("company/hr-profiles/", CompanyHRProfileListCreateView.as_view(), name="company-hr-profiles-list-create"),
+    path("company/hr-profiles/<uuid:pk>/", CompanyHRProfileDetailView.as_view(), name="company-hr-profile-detail"),
     path("company/check/", CompanyCheckView.as_view(), name="company-check"),
     # ─── Startups ───────────────────────────────────────────────
     path("", StartupListView.as_view(), name="startup_list"),

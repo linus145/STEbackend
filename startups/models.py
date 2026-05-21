@@ -62,6 +62,13 @@ class CompanyProfile(SoftDeleteModel):
     def check_company_password(self, raw_password):
         return check_password(raw_password, self.company_password)
 
+    @property
+    def hr_profile(self):
+        profile = self.hr_profiles.filter(is_deleted=False).first()
+        if not profile:
+            raise AttributeError("No active HR profile found.")
+        return profile
+
 
 class CompanyHRProfile(SoftDeleteModel):
     """
@@ -69,8 +76,8 @@ class CompanyHRProfile(SoftDeleteModel):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    company = models.OneToOneField(
-        CompanyProfile, on_delete=models.CASCADE, related_name="hr_profile", db_index=True
+    company = models.ForeignKey(
+        CompanyProfile, on_delete=models.CASCADE, related_name="hr_profiles", db_index=True
     )
     name = models.CharField(max_length=255, blank=True)
     email = models.EmailField(blank=True)

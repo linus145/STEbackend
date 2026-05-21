@@ -184,6 +184,7 @@ class AIService:
         salary_max       = job_brief.get("salary_max", "")
         currency         = job_brief.get("currency", "INR")
         description      = job_brief.get("description", "")[:3000]
+        job_category     = job_brief.get("job_category", "IT")
 
         exp_def = EXP_DEFINITIONS.get(experience_level, EXP_DEFINITIONS["ENTRY"])
         exp_label        = exp_def["label"]
@@ -213,6 +214,7 @@ Your task is a TWO-PASS evaluation of the attached resume against the job specif
 POSITION SPECIFICATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Job Title         : {job_title}
+Job Category      : {job_category}
 Department        : {department or "Not specified"}
 Employment Type   : {job_type.replace("_", " ").title()}
 Work Mode         : {work_mode.replace("_", " ").title()}
