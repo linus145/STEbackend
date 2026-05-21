@@ -70,13 +70,26 @@ class StartupTenantMixin:
 
             # Heal database model link dynamically if not associated:
             if not organization.startup:
-                startup = user.startups.first()
+                from startups.models import Startup
+                startup = Startup.objects.filter(founder=user, name=company.company_name).first()
                 if not startup:
-                    from startups.models import Startup
+                    startup = user.startups.first()
+                if not startup:
+                    startup = Startup.objects.filter(founder=user).first()
+                if not startup:
                     startup = Startup.objects.first()
-                if startup:
-                    organization.startup = startup
-                    organization.save()
+                if not startup:
+                    startup = Startup.objects.create(
+                        founder=user,
+                        name=company.company_name,
+                        pitch=company.description or f"Startup profile for {company.company_name}",
+                        industry=company.industry or "Technology",
+                        stage="Bootstrap",
+                        website_url=company.website,
+                        logo_url=company.logo_url
+                    )
+                organization.startup = startup
+                organization.save()
 
             from django.db.models import Q
             if hasattr(qs.model, "organization"):
@@ -86,11 +99,11 @@ class StartupTenantMixin:
             elif hasattr(qs.model, "employee"):
                 return qs.filter(Q(employee__organization=organization) | Q(employee__startup__founder=user))
             elif hasattr(qs.model, "startup"):
-                startup = user.startups.first()
+                startup = organization.startup
+                if not startup:
+                    startup = user.startups.first()
                 if startup:
                     return qs.filter(startup=startup)
-                elif organization and organization.startup:
-                    return qs.filter(startup=organization.startup)
 
         # 1.5 For Admin/HR who are registered as Employees (e.g. Operations managers, HR managers)
         if is_admin_or_hr and employee and employee.organization:
@@ -99,9 +112,23 @@ class StartupTenantMixin:
             # Heal database model link dynamically if not associated:
             if not organization.startup:
                 startup = employee.startup
+                from startups.models import Startup
                 if not startup:
-                    from startups.models import Startup
+                    startup = Startup.objects.filter(founder=organization.company.owner if organization.company else user, name=organization.name).first()
+                if not startup:
+                    startup = Startup.objects.filter(founder=organization.company.owner if organization.company else user).first()
+                if not startup:
                     startup = Startup.objects.first()
+                if not startup and organization.company and organization.company.owner:
+                    startup = Startup.objects.create(
+                        founder=organization.company.owner,
+                        name=organization.name,
+                        pitch=organization.description or f"Startup profile for {organization.name}",
+                        industry=organization.industry or "Technology",
+                        stage="Bootstrap",
+                        website_url=organization.website,
+                        logo_url=organization.logo_url
+                    )
                 if startup:
                     organization.startup = startup
                     organization.save()

@@ -36,10 +36,26 @@ class LeaveTypeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                     company=company, name=company.company_name
                 )
             
-            from startups.models import Startup
-            startup = Startup.objects.filter(founder=user).first()
-            if not startup:
-                startup = user.startups.first()
+            if not organization.startup:
+                from startups.models import Startup
+                st = Startup.objects.filter(founder=user, name=company.company_name).first()
+                if not st:
+                    st = Startup.objects.filter(founder=user).first()
+                if not st:
+                    st = Startup.objects.first()
+                if not st:
+                    st = Startup.objects.create(
+                        founder=user,
+                        name=company.company_name,
+                        pitch=company.description or f"Startup profile for {company.company_name}",
+                        industry=company.industry or "Technology",
+                        stage="Bootstrap",
+                        website_url=company.website,
+                        logo_url=company.logo_url
+                    )
+                organization.startup = st
+                organization.save()
+            startup = organization.startup
 
             serializer.save(
                 startup=startup,

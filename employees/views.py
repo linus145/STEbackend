@@ -54,7 +54,6 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        startup = user.startups.first()
 
         # Exact match of StartupTenantMixin logic for visibility
         from organization.models import Organization
@@ -67,6 +66,31 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                 organization = Organization.objects.create(
                     company=company, name=company.company_name
                 )
+
+        if organization:
+            # Heal organization startup if not set
+            if not organization.startup:
+                from startups.models import Startup
+                st = Startup.objects.filter(founder=user, name=company.company_name).first()
+                if not st:
+                    st = Startup.objects.filter(founder=user).first()
+                if not st:
+                    st = Startup.objects.first()
+                if not st:
+                    st = Startup.objects.create(
+                        founder=user,
+                        name=company.company_name,
+                        pitch=company.description or f"Startup profile for {company.company_name}",
+                        industry=company.industry or "Technology",
+                        stage="Bootstrap",
+                        website_url=company.website,
+                        logo_url=company.logo_url
+                    )
+                organization.startup = st
+                organization.save()
+            startup = organization.startup
+        else:
+            startup = user.startups.first()
 
         # Default joining date to today for immediate visibility
         from django.utils import timezone

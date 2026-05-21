@@ -60,28 +60,67 @@ def get_active_startup(request):
         if org and org.startup:
             return org.startup
         return None
-    
-    # 1. Try startups direct relation
-    if hasattr(user, 'startups'):
-        startup = user.startups.first()
-        if startup:
-            return startup
-        
+
+    # 1. Try company profile via Organization relation first (as HR tool is linked to organization)
+    company = getattr(user, "company_profile", None)
+    if company:
+        from organization.models import Organization
+        org = Organization.objects.filter(company=company).first()
+        if not org:
+            org = Organization.objects.create(
+                company=company, name=company.company_name
+            )
+        if not org.startup:
+            st = Startup.objects.filter(founder=user, name=company.company_name).first()
+            if not st:
+                st = Startup.objects.filter(founder=user).first()
+            if not st:
+                st = Startup.objects.first()
+            if not st:
+                st = Startup.objects.create(
+                    founder=user,
+                    name=company.company_name,
+                    pitch=company.description or f"Startup profile for {company.company_name}",
+                    industry=company.industry or "Technology",
+                    stage="Bootstrap",
+                    website_url=company.website,
+                    logo_url=company.logo_url
+                )
+            org.startup = st
+            org.save()
+        return org.startup
+
     # 2. Try employee profile
     employee = getattr(user, "employee_profile", None)
     if employee:
         if getattr(employee, "startup", None):
             return employee.startup
-        if getattr(employee, "organization", None) and employee.organization.startup:
-            return employee.organization.startup
-        
-    # 3. Try company profile via Organization relation
-    company = getattr(user, "company_profile", None)
-    if company:
-        from organization.models import Organization
-        org = Organization.objects.filter(company=company).first()
-        if org and org.startup:
-            return org.startup
+        if getattr(employee, "organization", None):
+            org = employee.organization
+            if not org.startup:
+                # Heal it!
+                st = Startup.objects.first()
+                if not st and org.company and org.company.owner:
+                    st = Startup.objects.create(
+                        founder=org.company.owner,
+                        name=org.name,
+                        pitch=org.description or f"Startup profile for {org.name}",
+                        industry=org.industry or "Technology",
+                        stage="Bootstrap",
+                        website_url=org.website,
+                        logo_url=org.logo_url
+                    )
+                if st:
+                    org.startup = st
+                    org.save()
+            if org.startup:
+                return org.startup
+
+    # 3. Try startups direct relation
+    if hasattr(user, 'startups'):
+        startup = user.startups.first()
+        if startup:
+            return startup
             
     # 4. Fallback to first startup
     st = Startup.objects.first()
@@ -90,8 +129,20 @@ def get_active_startup(request):
         
     from organization.models import Organization
     org = Organization.objects.first()
-    if org and org.startup:
-        return org.startup
+    if org:
+        if not org.startup and org.company and org.company.owner:
+            org.startup = Startup.objects.create(
+                founder=org.company.owner,
+                name=org.name,
+                pitch=org.description or f"Startup profile for {org.name}",
+                industry=org.industry or "Technology",
+                stage="Bootstrap",
+                website_url=org.website,
+                logo_url=org.logo_url
+            )
+            org.save()
+        if org.startup:
+            return org.startup
         
     return None
 
