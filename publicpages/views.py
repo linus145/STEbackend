@@ -2,12 +2,14 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
-from .models import AboutUs, Blog, JobOpening, ContactInquiry
+from .models import AboutUs, Blog, JobOpening, ContactInquiry, ContactSales, Careers
 from .serializers import (
     AboutUsSerializer,
     BlogSerializer,
     JobOpeningSerializer,
+    CareersSerializer,
     ContactInquirySerializer,
+    ContactSalesSerializer,
 )
 
 
@@ -40,11 +42,17 @@ class BlogDetailView(generics.RetrieveAPIView):
 
 class JobOpeningListView(generics.ListAPIView):
     permission_classes = [AllowAny]
-    queryset = JobOpening.objects.filter(is_active=True).order_by("-created_at")
-    serializer_class = JobOpeningSerializer
+    queryset = Careers.objects.filter(is_active=True).order_by("-created_at")
+    serializer_class = CareersSerializer
 
 
 class ContactInquiryCreateView(generics.CreateAPIView):
     permission_classes = [AllowAny]
     queryset = ContactInquiry.objects.all()
     serializer_class = ContactInquirySerializer
+
+
+class ContactSalesCreateView(generics.CreateAPIView):
+    permission_classes = [AllowAny]
+    queryset = ContactSales.objects.all()
+    serializer_class = ContactSalesSerializer

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import AboutUs, MissionPrinciple, Blog, JobOpening, ContactInquiry
+from .models import AboutUs, MissionPrinciple, Blog, JobOpening, ContactInquiry, ContactSales, Careers
 
 class MissionPrincipleSerializer(serializers.ModelSerializer):
     class Meta:
@@ -27,7 +27,17 @@ class JobOpeningSerializer(serializers.ModelSerializer):
         model = JobOpening
         fields = '__all__'
 
+class CareersSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Careers
+        fields = '__all__'
+
 class ContactInquirySerializer(serializers.ModelSerializer):
     class Meta:
         model = ContactInquiry
+        fields = '__all__'
+
+class ContactSalesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactSales
         fields = '__all__'
