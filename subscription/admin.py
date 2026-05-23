@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import SubscriptionPlan, UserSubscription
+from .models import SubscriptionPlan, UserSubscription, ManualPayment
 
 @admin.register(SubscriptionPlan)
 class SubscriptionPlanAdmin(admin.ModelAdmin):
@@ -82,3 +82,71 @@ class UserSubscriptionAdmin(admin.ModelAdmin):
     search_fields = ("user__email", "plan__name", "payment_reference")
     list_filter = ("status", "plan", "auto_renew")
     raw_id_fields = ("user",)
+
+
+@admin.register(ManualPayment)
+class ManualPaymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "user_email",
+        "plan",
+        "transaction_id",
+        "payment_method",
+        "payment_type",
+        "upgrade_upi_or_phone",
+        "status",
+        "created_at",
+    )
+    list_filter = ("status", "payment_type", "payment_method", "plan")
+    search_fields = ("user__email", "transaction_id", "notes")
+    raw_id_fields = ("user", "subscription", "plan")
+    readonly_fields = ("created_at", "updated_at", "screenshot_preview")
+    ordering = ("-created_at",)
+
+    def user_email(self, obj):
+        return obj.user.email
+    user_email.short_description = "User Email"
+
+    def screenshot_preview(self, obj):
+        if obj.screenshot:
+            from django.utils.html import format_html
+            url = obj.screenshot
+            if url.lower().endswith(('.pdf', '.pdf')):
+                return format_html('<a href="{}" target="_blank" style="font-weight: bold; color: #0a66c2;">📄 View PDF Transaction Proof</a>', url)
+            return format_html(
+                '<a href="{}" target="_blank">'
+                '<img src="{}" style="max-height: 400px; max-width: 100%; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" />'
+                '</a>', 
+                url, 
+                url
+            )
+        return "No screenshot uploaded"
+    screenshot_preview.short_description = "Screenshot Preview (Click to Expand)"
+
+    fieldsets = (
+        ("Verification Info", {
+            "fields": (
+                "user",
+                "subscription",
+                "plan",
+                "status",
+                "notes",
+            )
+        }),
+        ("Transaction Details", {
+            "fields": (
+                "transaction_id",
+                "payment_method",
+                "payment_type",
+                "upgrade_upi_or_phone",
+                "screenshot",
+                "screenshot_preview",
+            )
+        }),
+        ("System Timestamps", {
+            "fields": (
+                "created_at",
+                "updated_at",
+            )
+        }),
+    )
+

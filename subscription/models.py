@@ -268,3 +268,105 @@ class UserSubscription(models.Model):
             f"{self.user.email} - "
             f"{plan_name} ({self.status})"
         )
+
+
+class ManualPayment(models.Model):
+    STATUS_CHOICES = (
+        ("pending", "Pending Verification"),
+        ("approved", "Approved"),
+        ("rejected", "Rejected"),
+    )
+
+    PAYMENT_TYPE_CHOICES = (
+        ("new", "New Subscription"),
+        ("upgrade", "Upgrading Subscription"),
+    )
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="manual_payments",
+    )
+    subscription = models.ForeignKey(
+        UserSubscription,
+        on_delete=models.CASCADE,
+        related_name="manual_payments",
+    )
+    plan = models.ForeignKey(
+        SubscriptionPlan,
+        on_delete=models.CASCADE,
+        related_name="manual_payments",
+    )
+    transaction_id = models.CharField(
+        max_length=255,
+        unique=True,
+    )
+    payment_method = models.CharField(
+        max_length=100,
+        help_text="e.g. UPI, GPay, PhonePe, Net Banking",
+    )
+    payment_type = models.CharField(
+        max_length=20,
+        choices=PAYMENT_TYPE_CHOICES,
+        default="new",
+        help_text="Whether this is a new subscription or an upgrade",
+    )
+    upgrade_upi_or_phone = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="PhonePe Number or UPI ID (required only when payment_type is 'upgrade')",
+    )
+    screenshot = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="ImageKit CDN URL for transaction screenshot",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default="pending",
+    )
+    notes = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Reason for rejection or admin notes",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        verbose_name = "Manual Payment Verification"
+        verbose_name_plural = "Manual Payment Verifications"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.plan.name} - {self.status}"
+
+    def save(self, *args, **kwargs):
+        is_adding = self._state.adding
+        old_status = None
+        if not is_adding:
+            try:
+                old_status = ManualPayment.objects.get(pk=self.pk).status
+            except ManualPayment.DoesNotExist:
+                pass
+        
+        super().save(*args, **kwargs)
+        
+        # When status transitions to 'approved', automatically activate the associated subscription
+        if self.status == "approved" and old_status != "approved":
+            subscription = self.subscription
+            subscription.plan = self.plan
+            subscription.status = "active"
+            subscription.save()

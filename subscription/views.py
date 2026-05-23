@@ -4,8 +4,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 
-from .models import SubscriptionPlan, UserSubscription
-from .serializers import SubscriptionPlanSerializer, UserSubscriptionSerializer
+from .models import SubscriptionPlan, UserSubscription, ManualPayment
+from .serializers import SubscriptionPlanSerializer, UserSubscriptionSerializer, ManualPaymentSerializer
 
 class SubscriptionPlanListView(generics.ListAPIView):
     permission_classes = [AllowAny]
@@ -195,10 +195,86 @@ class UserSubscriptionView(APIView):
             }
         )
         serializer = UserSubscriptionSerializer(subscription)
-        return Response(serializer.data)
+        data = serializer.data
+        latest_payment = ManualPayment.objects.filter(user=request.user, subscription=subscription, plan=subscription.plan).order_by("-created_at").first()
+        data["latest_payment"] = ManualPaymentSerializer(latest_payment, context={"request": request}).data if latest_payment else None
+        return Response(data)
 
     def post(self, request):
         action = request.data.get("action")
+        
+        # Action to submit manual payment details and transaction screenshot
+        if action == "submit_payment":
+            try:
+                subscription = UserSubscription.objects.get(user=request.user)
+            except UserSubscription.DoesNotExist:
+                return Response({"error": "No subscription record found. Please select a plan first."}, status=status.HTTP_400_BAD_REQUEST)
+
+            plan = subscription.plan
+            if not plan:
+                return Response({"error": "No plan selected. Please choose a plan before submitting payment."}, status=status.HTTP_400_BAD_REQUEST)
+
+            transaction_id = request.data.get("transaction_id")
+            payment_method = request.data.get("payment_method")
+            payment_type = request.data.get("payment_type", "new")
+            upgrade_upi_or_phone = request.data.get("upgrade_upi_or_phone")
+            screenshot = request.FILES.get("screenshot")
+
+            if not transaction_id:
+                return Response({"error": "transaction_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+            if not payment_method:
+                return Response({"error": "payment_method is required"}, status=status.HTTP_400_BAD_REQUEST)
+            if payment_type == "upgrade" and not upgrade_upi_or_phone:
+                return Response({"error": "PhonePe Number or UPI ID is required when choosing an Upgrading Subscription."}, status=status.HTTP_400_BAD_REQUEST)
+            if not screenshot:
+                return Response({"error": "screenshot file is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Prevent duplicate transaction submissions
+            if ManualPayment.objects.filter(transaction_id=transaction_id.strip()).exists():
+                return Response({"error": "This Transaction ID has already been submitted."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Upload screenshot to ImageKit and optimize as WebP
+            from maincore.imagekit_utils import ImageKitService
+            import uuid
+            import os
+
+            ext = os.path.splitext(screenshot.name)[1].lower()
+            convert_to_webp = ext in [".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".jfif", ".avif"]
+
+            upload_result = ImageKitService.upload_file(
+                file_obj=screenshot,
+                folder="/payment_proofs",
+                file_name=f"verification_{request.user.id}_{uuid.uuid4().hex}",
+                convert_to_webp=convert_to_webp
+            )
+
+            if not upload_result:
+                return Response({"error": "Failed to upload transaction proof to ImageKit. Please try again."}, status=status.HTTP_502_BAD_GATEWAY)
+
+            screenshot_url = upload_result["url"]
+
+            # Create manual payment verification record
+            payment = ManualPayment.objects.create(
+                user=request.user,
+                subscription=subscription,
+                plan=plan,
+                transaction_id=transaction_id.strip(),
+                payment_method=payment_method.strip(),
+                payment_type=payment_type,
+                upgrade_upi_or_phone=upgrade_upi_or_phone.strip() if upgrade_upi_or_phone else None,
+                screenshot=screenshot_url,
+                status="pending"
+            )
+
+            # Ensure subscription is locked as pending until verified
+            subscription.status = "pending"
+            subscription.save()
+
+            serializer = UserSubscriptionSerializer(subscription)
+            data = serializer.data
+            data["latest_payment"] = ManualPaymentSerializer(payment, context={"request": request}).data
+            return Response(data, status=status.HTTP_201_CREATED)
+
         if action == "activate":
             try:
                 subscription = UserSubscription.objects.get(user=request.user)
@@ -208,6 +284,10 @@ class UserSubscriptionView(APIView):
             if not subscription.plan or subscription.plan.price == 0:
                 return Response({"error": "no subscription activated"}, status=status.HTTP_400_BAD_REQUEST)
             
+            # Premium plans can only be verified and activated by an admin
+            if subscription.plan.price > 0:
+                return Response({"error": "Premium plans must be verified manually by an administrator. Please submit payment verification details."}, status=status.HTTP_400_BAD_REQUEST)
+
             subscription.status = "active"
             subscription.save()
             serializer = UserSubscriptionSerializer(subscription)
