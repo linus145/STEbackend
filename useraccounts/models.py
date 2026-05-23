@@ -49,6 +49,15 @@ class CustomUser(AbstractBaseUser, PermissionsMixin, SoftDeleteModel):
     otp_created_at = models.DateTimeField(blank=True, null=True)
     google_id = models.CharField(max_length=255, unique=True, blank=True, null=True)
 
+    # Multi-Email 2FA Fields
+    secondary_email = models.EmailField(blank=True, null=True)
+    third_email = models.EmailField(blank=True, null=True)
+    secondary_email_otp = models.CharField(max_length=6, blank=True, null=True)
+    third_email_otp = models.CharField(max_length=6, blank=True, null=True)
+    secondary_email_otp_created_at = models.DateTimeField(blank=True, null=True)
+    third_email_otp_created_at = models.DateTimeField(blank=True, null=True)
+    is_2fa_enabled = models.BooleanField(default=False)
+
     # LinkedIn-Style Premium Fields
     is_premium = models.BooleanField(default=False)
     is_top_voice = models.BooleanField(default=False)

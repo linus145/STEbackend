@@ -7,6 +7,7 @@ from django.utils.decorators import method_decorator
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail, get_connection
 from django.template.loader import render_to_string
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.response import Response
@@ -401,6 +402,52 @@ class ChangePasswordView(APIView, RequestResponseMixin):
                     status.HTTP_400_BAD_REQUEST,
                 )
 
+            # If 2FA is enabled, check for OTP verification before changing password
+            if user.is_2fa_enabled:
+                secondary_otp = request.data.get("secondary_otp")
+                third_otp = request.data.get("third_otp")
+
+                # If OTPs are not provided, generate and send them
+                if not secondary_otp or not third_otp:
+                    if EmailService.send_2fa_otp_emails(user, user.secondary_email, user.third_email):
+                        return self.build_response(
+                            "2fa_required",
+                            "Verification codes have been sent to both backup emails.",
+                            {},
+                            status.HTTP_200_OK
+                        )
+                    return self.build_response(
+                        "error",
+                        "Failed to send 2FA codes. Please try again.",
+                        {},
+                        status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+
+                # Verify secondary email OTP
+                if not user.secondary_email_otp or user.secondary_email_otp != secondary_otp:
+                    return self.build_response("error", "Invalid secondary email verification code.", {}, status.HTTP_400_BAD_REQUEST)
+
+                if user.secondary_email_otp_created_at:
+                    expiration = user.secondary_email_otp_created_at + timezone.timedelta(minutes=10)
+                    if timezone.now() > expiration:
+                        return self.build_response("error", "Secondary email verification code has expired.", {}, status.HTTP_400_BAD_REQUEST)
+
+                # Verify third email OTP
+                if not user.third_email_otp or user.third_email_otp != third_otp:
+                    return self.build_response("error", "Invalid third email verification code.", {}, status.HTTP_400_BAD_REQUEST)
+
+                if user.third_email_otp_created_at:
+                    expiration = user.third_email_otp_created_at + timezone.timedelta(minutes=10)
+                    if timezone.now() > expiration:
+                        return self.build_response("error", "Third email verification code has expired.", {}, status.HTTP_400_BAD_REQUEST)
+
+                # Clear OTP fields on successful validation
+                user.secondary_email_otp = None
+                user.third_email_otp = None
+                user.secondary_email_otp_created_at = None
+                user.third_email_otp_created_at = None
+                user.save()
+
             user.set_password(new_password)
             user.save()
             return self.build_response(
@@ -718,5 +765,210 @@ class VerifyOTPView(APIView, RequestResponseMixin):
             return self.build_response("error", message, {}, status.HTTP_400_BAD_REQUEST)
         except CustomUser.DoesNotExist:
             return self.build_response("error", "User not found.", {}, status.HTTP_404_NOT_FOUND)
+
+
+class Request2FAOTPsView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        secondary_email = request.data.get("secondary_email")
+        third_email = request.data.get("third_email")
+
+        if not secondary_email or not third_email:
+            return self.build_response("error", "Both secondary and third emails are required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Basic validation
+        if secondary_email == user.email or third_email == user.email:
+            return self.build_response("error", "Backup emails cannot be the same as your primary account email.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if secondary_email == third_email:
+            return self.build_response("error", "Secondary and third emails must be different.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if EmailService.send_2fa_otp_emails(user, secondary_email, third_email):
+            return self.build_response("success", "OTP verification codes have been sent to both backup emails.", {}, status.HTTP_200_OK)
+        
+        return self.build_response("error", "Failed to send verification emails. Please check inputs and try again.", {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class Verify2FAOTPsView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        secondary_otp = request.data.get("secondary_otp")
+        third_otp = request.data.get("third_otp")
+
+        if not secondary_otp or not third_otp:
+            return self.build_response("error", "Both OTP codes are required for verification.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Verify secondary email OTP
+        if not user.secondary_email_otp or user.secondary_email_otp != secondary_otp:
+            return self.build_response("error", "Invalid secondary email verification code.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if user.secondary_email_otp_created_at:
+            expiration = user.secondary_email_otp_created_at + timezone.timedelta(minutes=10)
+            if timezone.now() > expiration:
+                return self.build_response("error", "Secondary email verification code has expired.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Verify third email OTP
+        if not user.third_email_otp or user.third_email_otp != third_otp:
+            return self.build_response("error", "Invalid third email verification code.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if user.third_email_otp_created_at:
+            expiration = user.third_email_otp_created_at + timezone.timedelta(minutes=10)
+            if timezone.now() > expiration:
+                return self.build_response("error", "Third email verification code has expired.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Mark 2FA enabled
+        user.is_2fa_enabled = True
+        user.secondary_email_otp = None
+        user.third_email_otp = None
+        user.secondary_email_otp_created_at = None
+        user.third_email_otp_created_at = None
+        user.save()
+
+        return self.build_response(
+            "success",
+            "Two-step verification activated successfully.",
+            UserSerializer(user).data,
+            status.HTTP_200_OK
+        )
+
+
+class Disable2FAView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        user.is_2fa_enabled = False
+        user.secondary_email = None
+        user.third_email = None
+        user.secondary_email_otp = None
+        user.third_email_otp = None
+        user.secondary_email_otp_created_at = None
+        user.third_email_otp_created_at = None
+        user.save()
+
+        return self.build_response(
+            "success",
+            "Two-step verification has been disabled.",
+            UserSerializer(user).data,
+            status.HTTP_200_OK
+        )
+
+
+class RequestSecondary2FAOTPView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        secondary_email = request.data.get("secondary_email")
+
+        if not secondary_email:
+            return self.build_response("error", "Secondary email is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if secondary_email == user.email:
+            return self.build_response("error", "Backup email cannot be the same as your primary account email.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if EmailService.send_secondary_2fa_otp(user, secondary_email):
+            return self.build_response("success", "OTP verification code has been sent to your secondary email.", {}, status.HTTP_200_OK)
+        
+        return self.build_response("error", "Failed to send verification email. Please try again.", {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class VerifySecondary2FAOTPView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        secondary_otp = request.data.get("secondary_otp")
+
+        if not secondary_otp:
+            return self.build_response("error", "OTP code is required for verification.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if not user.secondary_email_otp or user.secondary_email_otp != secondary_otp:
+            return self.build_response("error", "Invalid secondary email verification code.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if user.secondary_email_otp_created_at:
+            expiration = user.secondary_email_otp_created_at + timezone.timedelta(minutes=10)
+            if timezone.now() > expiration:
+                return self.build_response("error", "Verification code has expired.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Mark secondary email OTP as VERIFIED
+        user.secondary_email_otp = 'DONE'
+        user.save(update_fields=['secondary_email_otp'])
+
+        return self.build_response(
+            "success",
+            "Secondary backup email verified successfully.",
+            {},
+            status.HTTP_200_OK
+        )
+
+
+class RequestThird2FAOTPView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        third_email = request.data.get("third_email")
+
+        if not third_email:
+            return self.build_response("error", "Third email is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if third_email == user.email:
+            return self.build_response("error", "Backup email cannot be the same as your primary account email.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if third_email == user.secondary_email:
+            return self.build_response("error", "Third email must be different from secondary email.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Check if secondary email is already verified
+        if user.secondary_email_otp != 'DONE':
+            return self.build_response("error", "Please verify your secondary backup email first.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if EmailService.send_third_2fa_otp(user, third_email):
+            return self.build_response("success", "OTP verification code has been sent to your third email.", {}, status.HTTP_200_OK)
+        
+        return self.build_response("error", "Failed to send verification email. Please try again.", {}, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class VerifyThird2FAOTPView(APIView, RequestResponseMixin):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        third_otp = request.data.get("third_otp")
+
+        if not third_otp:
+            return self.build_response("error", "OTP code is required for verification.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Check if secondary email is already verified
+        if user.secondary_email_otp != 'DONE':
+            return self.build_response("error", "Please verify your secondary backup email first.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if not user.third_email_otp or user.third_email_otp != third_otp:
+            return self.build_response("error", "Invalid third email verification code.", {}, status.HTTP_400_BAD_REQUEST)
+
+        if user.third_email_otp_created_at:
+            expiration = user.third_email_otp_created_at + timezone.timedelta(minutes=10)
+            if timezone.now() > expiration:
+                return self.build_response("error", "Verification code has expired.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # Enable 2FA
+        user.is_2fa_enabled = True
+        user.secondary_email_otp = None
+        user.third_email_otp = None
+        user.secondary_email_otp_created_at = None
+        user.third_email_otp_created_at = None
+        user.save()
+
+        return self.build_response(
+            "success",
+            "Two-step verification activated successfully.",
+            UserSerializer(user).data,
+            status.HTTP_200_OK
+        )
+
 
 

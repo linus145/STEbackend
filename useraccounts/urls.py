@@ -16,6 +16,13 @@ from useraccounts.views import (
     RecruiterBulkContactView,
     RequestOTPView,
     VerifyOTPView,
+    Request2FAOTPsView,
+    Verify2FAOTPsView,
+    Disable2FAView,
+    RequestSecondary2FAOTPView,
+    VerifySecondary2FAOTPView,
+    RequestThird2FAOTPView,
+    VerifyThird2FAOTPView,
 )
 
 app_name = "useraccounts"
@@ -36,4 +43,11 @@ urlpatterns = [
     path("update-mobile/", UpdatePhoneNumberView.as_view(), name="update-mobile"),
     path("request-otp/", RequestOTPView.as_view(), name="request-otp"),
     path("verify-otp/", VerifyOTPView.as_view(), name="verify-otp"),
+    path("request-2fa-otps/", Request2FAOTPsView.as_view(), name="request-2fa-otps"),
+    path("verify-2fa-otps/", Verify2FAOTPsView.as_view(), name="verify-2fa-otps"),
+    path("request-secondary-2fa-otp/", RequestSecondary2FAOTPView.as_view(), name="request-secondary-2fa-otp"),
+    path("verify-secondary-2fa-otp/", VerifySecondary2FAOTPView.as_view(), name="verify-secondary-2fa-otp"),
+    path("request-third-2fa-otp/", RequestThird2FAOTPView.as_view(), name="request-third-2fa-otp"),
+    path("verify-third-2fa-otp/", VerifyThird2FAOTPView.as_view(), name="verify-third-2fa-otp"),
+    path("disable-2fa/", Disable2FAView.as_view(), name="disable-2fa"),
 ]
