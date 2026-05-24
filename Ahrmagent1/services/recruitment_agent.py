@@ -145,11 +145,11 @@ class RecruitmentAgentService(BrowserAgentService):
                     lambda: job.applications.count(), thread_sensitive=False
                 )()
 
-                self.log(f"Backend Monitor: {count}/{target_count} applicants found.")
+                self.log(f"Backend Monitor: Job '{job.title}' has {job.open_positions} open positions. Found {count} applications out of target {target_count} for screening.")
 
                 if count >= target_count:
                     self.log(
-                        "Target count reached. Triggering AI Screening Engine...",
+                        f"Target count reached. Triggering AI Screening Engine for {count} applications (Job Openings: {job.open_positions})...",
                         action="trigger_screening",
                     )
                     break
@@ -244,34 +244,33 @@ class RecruitmentAgentService(BrowserAgentService):
                 )
 
             # 3. Shortlisting Phase
-            self.log("Picking the top scorer for interview...", action="shortlisting")
+            open_positions = job.open_positions if (job.open_positions and job.open_positions > 0) else 1
+            self.log(f"Picking the top {open_positions} scorer(s) for interview...", action="shortlisting")
 
-            def get_top():
-                return (
+            def get_top_n(n):
+                return list(
                     JobApplication.objects.filter(job_id=job_id, ai_score__isnull=False)
                     .select_related("applicant")
-                    .order_by("-ai_score")
-                    .first()
+                    .order_by("-ai_score")[:n]
                 )
 
-            top_app = await sync_to_async(get_top, thread_sensitive=False)()
+            top_apps = await sync_to_async(get_top_n, thread_sensitive=False)(open_positions)
 
-            if not top_app:
+            if not top_apps:
                 self.log(
                     "No candidates found with scores. Workflow ended.", level="ERROR"
                 )
                 return False
 
-            top_email = top_app.applicant.email
-            self.log(f"WINNER: {top_email} with score {top_app.ai_score}%")
+            self.log(f"Top candidate(s) shortlisted: " + ", ".join([f"{app.applicant.email} ({app.ai_score}%)" for app in top_apps]))
 
             # 4. Action Phase: Mark as Interview
             self.log(
-                f"Transitioning winner to Interview stage...",
+                f"Transitioning {len(top_apps)} shortlisted candidate(s) to Interview stage...",
                 action="interview_transition",
             )
 
-            def final_actions(app_id, j_id, r_user_id):
+            def final_actions(app_ids, j_id, r_user_id):
                 from jobs.models import JobApplication, JobPost
                 from AI.models import AIScreeningReport
                 from django.contrib.auth import get_user_model
@@ -279,12 +278,13 @@ class RecruitmentAgentService(BrowserAgentService):
 
                 User = get_user_model()
 
-                # Mark application as interview
-                app = JobApplication.objects.select_related("job", "job__company", "job__company__owner").get(
-                    id=app_id
-                )
-                app.status = "INTERVIEW"
-                app.save()
+                # Mark all top application(s) as interview
+                apps = list(JobApplication.objects.select_related("job", "job__company", "job__company__owner").filter(
+                    id__in=app_ids
+                ))
+                for app in apps:
+                    app.status = "INTERVIEW"
+                    app.save()
 
                 # Robust recruiter resolution: request user → company owner → any staff user
                 recruiter_user = None
@@ -297,9 +297,9 @@ class RecruitmentAgentService(BrowserAgentService):
                         pass
 
                 # 2. Try the job's company owner
-                if not recruiter_user:
+                if not recruiter_user and apps:
                     try:
-                        recruiter_user = app.job.company.owner
+                        recruiter_user = apps[0].job.company.owner
                     except Exception:
                         pass
 
@@ -307,9 +307,9 @@ class RecruitmentAgentService(BrowserAgentService):
                 if not recruiter_user:
                     recruiter_user = User.objects.filter(is_staff=True).first()
 
-                # 4. Last resort: use the applicant (should never reach here)
-                if not recruiter_user:
-                    recruiter_user = app.applicant
+                # 4. Last resort: use the first applicant if nothing else works
+                if not recruiter_user and apps:
+                    recruiter_user = apps[0].applicant
 
                 # Create a formal report for the UI Panel to display
                 all_scored = (
@@ -361,9 +361,17 @@ class RecruitmentAgentService(BrowserAgentService):
                         }
                     )
 
+                if apps:
+                    job_title = apps[0].job.title
+                else:
+                    try:
+                        job_title = JobPost.objects.get(id=j_id).title
+                    except Exception:
+                        job_title = "Unknown Job"
+
                 AIScreeningReport.objects.create(
                     job_id=j_id,
-                    job_title=app.job.title,
+                    job_title=job_title,
                     recruiter=recruiter_user,
                     results={
                         "status": "completed",
@@ -376,7 +384,7 @@ class RecruitmentAgentService(BrowserAgentService):
                 return True
 
             await sync_to_async(final_actions, thread_sensitive=False)(
-                top_app.id, job_id, recruiter_user_id
+                [app.id for app in top_apps], job_id, recruiter_user_id
             )
 
             self.log(

@@ -139,11 +139,15 @@ B. HR SUITE (SPA with Tabbed Navigation)
     - "nav-parent-leave" → Leave section parent button. Click to expand:
       - "nav-tab-hr-sub-leave-company", "nav-tab-hr-sub-leave-requests", "nav-tab-hr-sub-leave-pending", "nav-tab-hr-sub-leave-approved".
     - "nav-parent-payroll" → Payroll section parent button. Click to expand sub-menu tabs:
-      - "nav-tab-hr-sub-payroll-dashboard" → Payroll general metric statistics.
-      - "nav-tab-hr-sub-payroll-runs" → Manage payroll runs. Click `"payroll-start-run-btn"` to launch start-run dialog:
-        - `payroll-new-run-month-select` → Select dropdown for month.
-        - `payroll-new-run-year-select` → Select dropdown for year.
-        - `payroll-new-run-compile-btn` → Compile sheets submit button.
+      - "nav-tab-hr-sub-payroll-dashboard" → Payroll general metric statistics (URL: /payroll/dashboard).
+      - "nav-tab-hr-sub-payroll-runs" → Manage payroll runs (URL: /payroll/runs).
+        - You can navigate directly here using the 'navigate' or 'open_new_tab' action with value "/payroll/runs".
+        - Click `"payroll-start-run-btn"` to launch the monthly payroll run dialog.
+        - Inside the monthly payroll run dialog:
+          - `payroll-new-run-month-select` → Dropdown select for target month. Set value to "7" (or text "July") to run payroll for July.
+          - `payroll-new-run-year-select` → Dropdown select for year. Set value to "2026" (or text "2026") to run payroll for 2026.
+          - `payroll-new-run-compile-btn` → Click this button to compile and generate payroll runs.
+          - Once clicked, wait 2000ms.
         - Rows have action buttons: `payroll-rerun-btn-{run.id}`, `payroll-delete-btn-{run.id}`, and `payroll-review-sheet-btn-{run.id}`.
         - Drilldown view actions: `payroll-back-to-logs-btn` (back), `payroll-drilldown-rerun-btn-{run.id}` (recalculate).
       - "nav-tab-hr-sub-payroll-approvals" → Executive queue.

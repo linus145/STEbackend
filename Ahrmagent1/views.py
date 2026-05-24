@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from Ahrmagent1.serializers import AgentRunRequestSerializer, AgentExecutionSerializer
 from Ahrmagent1.services.execution_agent import ExecutionAgentService
 from Ahrmagent1.services.autonomous_agent import AutonomousAgentService
@@ -99,9 +99,36 @@ class LLMThinkView(APIView):
       5. Frontend executes the action via AgentExecutor
       6. Loop back to step 1
     """
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        # Plan-aware capability guard in the backend
+        try:
+            from subscription.models import UserSubscription
+            user_sub = UserSubscription.objects.get(user=request.user)
+            if user_sub.status != "active" or not user_sub.plan or user_sub.plan.price < 18000:
+                return Response(
+                    {
+                        "action_type": "wait",
+                        "wait_after_ms": 5000,
+                        "thinking": "Enterprise AI OS plan required to run autonomous agent.",
+                        "description": "Subscription verification failed. Act mode locked.",
+                        "error": "Insufficient permissions. Enterprise plan required.",
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        except Exception:
+            return Response(
+                {
+                    "action_type": "wait",
+                    "wait_after_ms": 5000,
+                    "thinking": "No active subscription found. Enterprise plan required.",
+                    "description": "Subscription verification failed.",
+                    "error": "No active subscription. Enterprise plan required.",
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         goal = request.data.get("goal", "")
         page_state = request.data.get("page_state", {})
         action_history = request.data.get("action_history", [])
