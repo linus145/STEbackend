@@ -184,6 +184,24 @@ class AutonomousAgentService:
                             "selector": "#deadline",
                             "value": job_data.get("deadline", ""),
                         },
+                        {"type": "wait", "duration": 2000},
+                        {
+                            "type": "type",
+                            "selector": "#job_category",
+                            "value": job_data.get("job_category", "IT"),
+                        },
+                        {"type": "wait", "duration": 2000},
+                        {
+                            "type": "type",
+                            "selector": "#status",
+                            "value": job_data.get("status", "ACTIVE"),
+                        },
+                        {"type": "wait", "duration": 2000},
+                        {
+                            "type": "type",
+                            "selector": "#hiring_status",
+                            "value": job_data.get("hiring_status", "ACTIVELY_HIRING"),
+                        },
                         {"type": "wait", "duration": 2500},
                     ]
 
@@ -198,7 +216,7 @@ class AutonomousAgentService:
                             job_plan.append({"type": "click-skill", "value": skill})
                             job_plan.append({"type": "wait", "duration": 1000})
                         job_plan.append(
-                            {"type": "click", "selector": "text='Skills Required *'"}
+                            {"type": "click", "selector": "skills-dropdown-trigger"}
                         )
                         job_plan.append({"type": "wait", "duration": 1500})
 
@@ -332,6 +350,9 @@ class AutonomousAgentService:
                 "open_positions": "1",
                 "currency": "INR",
                 "deadline": default_deadline,
+                "job_category": "IT",
+                "status": "ACTIVE",
+                "hiring_status": "ACTIVELY_HIRING",
                 "skills": ["React", "Node.js", "TypeScript"],
             }
 
@@ -584,7 +605,10 @@ The response must remain structured, deterministic, and ATS-friendly.
             - job_type: MUST BE one of [FULL_TIME, PART_TIME, CONTRACT, INTERNSHIP]
             - work_mode: MUST BE one of [REMOTE, ONSITE, HYBRID]
             - experience_level: MUST BE one of [ENTRY, MID, SENIOR, LEAD]. (Map 'Junior' to ENTRY or MID as appropriate).
-            - skills: A list of 3 to 5 most relevant tech skills (e.g. ["Python", "AWS"]).
+            - job_category: MUST BE one of [IT, NON_IT]. Default to 'IT' for tech roles.
+            - status: MUST BE 'ACTIVE'.
+            - hiring_status: MUST BE 'ACTIVELY_HIRING'.
+            - skills: A comprehensive list of 5 to 10 highly relevant tech skills, libraries, frameworks, and specialized concepts/subtopics tailored dynamically to the requested job title and seniority level. If the title is simply "Developer" or has no explicit seniority keyword, assume a Mid-level role requiring 1+ years of experience and generate professional skills appropriate for that level.
             """
 
             response = client.models.generate_content(
@@ -609,6 +633,9 @@ The response must remain structured, deterministic, and ATS-friendly.
                 "open_positions": "1",
                 "currency": "INR",
                 "deadline": default_deadline,
+                "job_category": "IT",
+                "status": "ACTIVE",
+                "hiring_status": "ACTIVELY_HIRING",
                 "skills": ["Software Engineering"],
             }
 
@@ -649,7 +676,10 @@ The response must remain structured, deterministic, and ATS-friendly.
             - job_type: [FULL_TIME, PART_TIME, CONTRACT, INTERNSHIP]
             - work_mode: [REMOTE, ONSITE, HYBRID]
             - experience_level: MUST BE one of [ENTRY, MID, SENIOR, LEAD]
-            - skills: List of 3-5 tech skills.
+            - job_category: MUST BE one of [IT, NON_IT]
+            - status: MUST BE 'ACTIVE'
+            - hiring_status: MUST BE 'ACTIVELY_HIRING'
+            - skills: A comprehensive list of 5 to 10 highly relevant tech skills, frameworks, libraries, and specialized subtopics matching the job's seniority level. If the seniority is unspecified or just "Developer", assume a Mid-level role requiring 1+ years of experience and generate skills appropriate for that level.
             """
 
             response = client.models.generate_content(
@@ -793,6 +823,24 @@ The response must remain structured, deterministic, and ATS-friendly.
                         "selector": "#deadline",
                         "value": job_data.get("deadline", ""),
                     },
+                    {"type": "wait", "duration": 2000},
+                    {
+                        "type": "type",
+                        "selector": "#job_category",
+                        "value": job_data.get("job_category", "IT"),
+                    },
+                    {"type": "wait", "duration": 2000},
+                    {
+                        "type": "type",
+                        "selector": "#status",
+                        "value": job_data.get("status", "ACTIVE"),
+                    },
+                    {"type": "wait", "duration": 2000},
+                    {
+                        "type": "type",
+                        "selector": "#hiring_status",
+                        "value": job_data.get("hiring_status", "ACTIVELY_HIRING"),
+                    },
                     {"type": "wait", "duration": 2500},
                 ]
 
@@ -813,7 +861,7 @@ The response must remain structured, deterministic, and ATS-friendly.
 
                     # Close dropdown
                     plan.append(
-                        {"type": "click", "selector": "text='Skills Required *'"}
+                        {"type": "click", "selector": "skills-dropdown-trigger"}
                     )
                     plan.append({"type": "wait", "duration": 1500})
 

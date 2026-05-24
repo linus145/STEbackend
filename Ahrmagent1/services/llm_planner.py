@@ -64,6 +64,53 @@ A. RECRUITER SUITE (SPA with Tabbed Navigation)
     - Link to "/Hrtools" (text "HR Tool") → Redirects to the HR Tools Suite.
   - DROPDOWN PROTECTION: If "nav-link-interview-pipeline" or "HR Tool" is ALREADY visible in the current Page State, the dropdown is ALREADY open. DO NOT click "nav-more-button" again, as clicking it a second time will toggle the dropdown closed. Just click the target link directly!
   - NA--------------------------------------------------
+A.1 JOB POSTING FORM (Renders when "create-job-button" is clicked)
+--------------------------------------------------
+Use these data-agent selectors to fill out the form:
+  - "job-title-input" → Role Title (e.g. "Senior React Engineer")
+  - "job-description-input" → Detailed job description (write a professional job description matching the requirements)
+  - "job-type-select" → Select Job Type. Options: 'FULL_TIME' (Full Time), 'PART_TIME' (Part Time), 'CONTRACT' (Contract), 'INTERNSHIP' (Internship)
+  - "job-work-mode-select" → Select Work Mode. Options: 'REMOTE' (Remote), 'ONSITE' (On-site), 'HYBRID' (Hybrid)
+  - "job-category-select" → Select Job Category. Options: 'IT', 'NON_IT'
+  - "job-experience-level-select" → Select Experience Level. Options: 'ENTRY' (Entry Level), 'MID' (Mid Level), 'SENIOR' (Senior Level), 'LEAD' (Lead / Principal)
+  - "job-location-input" → Location (e.g. "Bangalore" or "San Francisco, CA")
+  - "job-department-input" → Department/Role Group (e.g. "Engineering")
+  - "job-salary-min-input" → Minimum salary in numbers (e.g. 2500000)
+  - "job-salary-max-input" → Maximum salary in numbers (e.g. 3000000)
+  - "job-currency-input" → Currency (default: "INR")
+  - "job-open-positions-input" → Number of open positions (default: 1)
+  - "skills-dropdown-trigger" → Click this to open or close the skills dropdown.
+  - "skills-search-input" → Type a skill name here. After typing, click the skill option button in the list or click the custom skill button ("add-custom-skill-button") if it's not in the list. Repeat this for each skill.
+  - "job-deadline-input" → Application deadline date (format: YYYY-MM-DD, e.g. "2026-06-30")
+  - "job-status-select" → Publish Status. Options: 'DRAFT', 'ACTIVE'
+  - "job-hiring-status-select" → Hiring Status. Options: 'ACTIVELY_HIRING', 'ACTIVELY_REVIEWING'
+  - "submit-job-button" → Submit and post the job.
+
+* AUTONOMOUS FIELD GENERATION & SEQUENTIAL FORM COMPLETION (CRITICAL):
+  - The agent MUST act fully autonomously. If details like salary range, job type, work mode, experience level, department, skills, or deadline are not specified in the user's prompt, the LLM MUST NOT ask the user for these details.
+  - Instead, the LLM must analyze the requested Job Title and autonomously generate standard, professional, and industry-appropriate values for all these fields (e.g., for a "junior java developer", it should autonomously choose ENTRY or MID experience, standard salary ranges, and appropriate IT skills).
+  - Complete the form and click "submit-job-button" directly without pausing to ask the user for field clarifications.
+  - Ensure ALL of the following fields are populated in order before submitting:
+    1. "job-title-input" (Type the generated Title)
+    2. "job-description-input" (Type a professional Markdown description with overview, responsibilities, requirements)
+    3. "job-type-select" (Select job type option)
+    4. "job-work-mode-select" (Select work mode option)
+    5. "job-category-select" (Select category: 'IT' for tech roles, 'NON_IT' for others)
+    6. "job-experience-level-select" (Select experience level: ENTRY, MID, SENIOR, LEAD)
+    7. "job-location-input" (Type location, e.g. "Bangalore" or "Remote")
+    8. "job-department-input" (Type department, e.g. "Engineering" or "Sales")
+    9. "job-salary-min-input" and "job-salary-max-input" (Type realistic numeric salary ranges)
+    10. "job-currency-input" (Type currency, e.g., "INR" or "USD")
+    11. "job-open-positions-input" (Type number of openings, e.g., 1)
+    12. Add 5 to 10 appropriate, highly relevant skills using the "click-skill" action type. The skills must cover core languages, frameworks, libraries, subtopics, and modern paradigms tailored dynamically to the role's title and seniority level. If a role is just specified as "Developer" (without seniority keywords), treat it as requiring 1+ years of experience (Mid-level) and select relevant professional skills accordingly.
+    13. Click "skills-dropdown-trigger" to close the skills dropdown.
+    14. "job-deadline-input" (Type deadline date formatted YYYY-MM-DD, e.g. 30 days from now)
+    15. "job-status-select" (Set to 'ACTIVE' to publish immediately)
+    16. "job-hiring-status-select" (Set to 'ACTIVELY_HIRING')
+  - After filling ALL elements, click the "submit-job-button" to complete the posting.
+
+* Adding Skills: ALWAYS use the custom "click-skill" action type to add skills (e.g., action_type="click-skill", value="Java"). You do NOT need to click the dropdown trigger or type into the search input manually. Just generate one "click-skill" action per required skill.
+--------------------------------------------------
 B. HR SUITE (SPA with Tabbed Navigation)
 --------------------------------------------------
 * Base Path: /Hrtools
@@ -354,7 +401,7 @@ class LLMVisionPlanner:
         # Build visible elements summary
         visible_summary = ""
         if page_state.get("visible_elements"):
-            for el in page_state["visible_elements"][:50]:
+            for el in page_state["visible_elements"][:120]:
                 tag = el.get("tag", "?")
                 agent = el.get("data_agent", "")
                 text = el.get("text", "")[:80]
@@ -448,9 +495,9 @@ Based on the page state above, decide the SINGLE NEXT action to take.
 Return ONLY a valid JSON object:
 {{
     "thinking": "Brief analysis: what you see, where you are, and why you chose this action",
-    "action_type": "click | type | wait | scroll | select | ask_user | open_new_tab | done",
+    "action_type": "click | type | wait | scroll | select | ask_user | open_new_tab | click-skill | done",
     "selector": "data-agent value OR CSS selector (for click/type/select)",
-    "value": "text to type (for type) OR question (for ask_user) OR URL path (for open_new_tab)",
+    "value": "text to type (for type) OR question (for ask_user) OR URL path (for open_new_tab) OR skill name (for click-skill)",
     "options": ["Option 1", "Option 2"], // OPTIONAL: only for ask_user to show selection boxes
     "wait_after_ms": 2000,
     "description": "Human-readable description"
@@ -464,6 +511,7 @@ ACTION TYPES:
 - scroll: Scroll page down.
 - ask_user: Pause and ask user a question. Put question in "value".
 - open_new_tab: Open a URL in new tab. Put relative path in "value" (e.g. "/recruiter/AIInterviews").
+- click-skill: Add a skill to the job posting. Put the skill name in "value" (e.g. "React"). No selector is required.
 - done: Goal is complete. No more actions needed.
 
 IMPORTANT:
