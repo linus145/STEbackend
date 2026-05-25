@@ -59,15 +59,21 @@ class InterviewOrchestrator:
                 if isinstance(q_data, dict):
                     q_text = q_data.get('text', '')
                     q_marks = int(q_data.get('marks', 10))
+                    q_type = q_data.get('question_type', rnd.question_format or 'TEXT')
+                    q_mcq = q_data.get('mcq_options')
                 else:
                     q_text = str(q_data)
                     q_marks = 10
+                    q_type = rnd.question_format or 'TEXT'
+                    q_mcq = None
                 
                 if q_text.strip():
                     InterviewQuestion.objects.create(
                         round=rnd,
                         question_text=q_text,
                         marks=q_marks,
+                        question_type=q_type,
+                        mcq_options=q_mcq,
                         ideal_answer=q_data.get('ideal_answer') if isinstance(q_data, dict) else None
                     )
                     total_marks += q_marks

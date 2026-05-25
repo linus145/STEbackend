@@ -93,6 +93,8 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
         round_category = request.data.get("round_category", "NON_CODING")
         question_format = request.data.get("question_format", "TEXT")
         programming_language = request.data.get("programming_language", "")
+        coding_topics = request.data.get("coding_topics", [])
+        coding_frameworks = request.data.get("coding_frameworks", [])
         count = request.data.get("count", 5)
 
         if not application_id:
@@ -112,6 +114,8 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
                 question_format,
                 programming_language,
                 count,
+                coding_topics,
+                coding_frameworks,
             )
             return self.build_response(
                 "success",

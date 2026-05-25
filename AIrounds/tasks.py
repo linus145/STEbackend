@@ -6,13 +6,13 @@ from AIrounds.services.engine_service import InterviewEngineService
 logger = logging.getLogger("ai_rounds.tasks")
 
 @shared_task
-def task_generate_question_pool(application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count):
+def task_generate_question_pool(application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count, coding_topics=None, coding_frameworks=None):
     """
     Celery task to generate a pool of interview questions.
     """
     try:
         questions = InterviewEngineService.generate_question_pool(
-            application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count
+            application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count, coding_topics, coding_frameworks
         )
         return questions
     except Exception as e:
@@ -28,6 +28,9 @@ def task_regenerate_round_questions(round_id, count):
         rnd = InterviewRound.objects.select_related('session__application').get(id=round_id)
         application_id = str(rnd.session.application.id)
 
+        coding_topics = rnd.settings.get('coding_topics') if isinstance(rnd.settings, dict) else None
+        coding_frameworks = rnd.settings.get('coding_frameworks') if isinstance(rnd.settings, dict) else None
+
         questions = InterviewEngineService.generate_question_pool(
             application_id,
             rnd.round_type or rnd.designation,
@@ -36,7 +39,9 @@ def task_regenerate_round_questions(round_id, count):
             rnd.round_category or 'NON_CODING',
             rnd.question_format or 'TEXT',
             rnd.programming_language or '',
-            count
+            count,
+            coding_topics,
+            coding_frameworks
         )
 
         # Delete old questions and create new ones
@@ -45,15 +50,18 @@ def task_regenerate_round_questions(round_id, count):
             if isinstance(q_data, dict):
                 q_text = q_data.get('question')
                 q_ideal = q_data.get('ideal_answer')
+                q_mcq = q_data.get('mcq_options')
             else:
                 q_text = q_data
                 q_ideal = None
+                q_mcq = None
 
             InterviewQuestion.objects.create(
                 round=rnd,
                 question_text=q_text,
                 ideal_answer=q_ideal,
                 question_type=rnd.question_format or 'TEXT',
+                mcq_options=q_mcq,
             )
         
         return f"{len(questions)} questions regenerated for round {round_id}"

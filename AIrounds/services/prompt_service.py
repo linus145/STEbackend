@@ -113,7 +113,7 @@ FINAL ROUND SUMMARY FORMAT:
         }
         return json.dumps(context)
     @staticmethod
-    def build_config_context(application, round_type, designation, difficulty, round_category='NON_CODING'):
+    def build_config_context(application, round_type, designation, difficulty, round_category='NON_CODING', question_format='TEXT', programming_language=''):
         """Constructs context for pre-interview question generation."""
         context = {
             "job_info": {
@@ -125,6 +125,8 @@ FINAL ROUND SUMMARY FORMAT:
                 "designation": designation,
                 "difficulty": difficulty,
                 "round_category": round_category,
+                "question_format": question_format,
+                "programming_language": programming_language,
             }
         }
 

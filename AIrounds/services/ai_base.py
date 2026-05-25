@@ -24,13 +24,14 @@ class AIBaseService:
         return cls._client
 
     @classmethod
-    def generate_content(cls, prompt, system_instruction, temperature=0.7):
+    def generate_content(cls, prompt, system_instruction, temperature=0.7, response_schema=None):
         client = cls.get_client()
         try:
             config = types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 temperature=temperature,
                 response_mime_type="application/json",
+                response_schema=response_schema,
             )
 
             response = client.models.generate_content(

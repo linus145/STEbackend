@@ -1,9 +1,30 @@
 import json
 import logging
+import concurrent.futures
+import time
 from django.utils import timezone
+from pydantic import BaseModel, Field
 from AIrounds.models import InterviewSession, InterviewRound, InterviewQuestion
 from AIrounds.services.ai_base import AIBaseService
 from AIrounds.services.prompt_service import InterviewPromptService
+
+class MCQOptionSchema(BaseModel):
+    label: str = Field(description="The option key (e.g., 'A', 'B', 'C', 'D')")
+    text: str = Field(description="The option content text")
+    is_correct: bool = Field(description="True if this option is the correct answer, False otherwise")
+
+class GeneratedQuestion(BaseModel):
+    question: str = Field(description="The main question text (without option labels if it is an MCQ/MULTI_SELECT question)")
+    ideal_answer: str = Field(description="Detailed ideal answer or step-by-step solution / evaluation criteria")
+    mcq_options: list[MCQOptionSchema] = Field(default=[], description="List of options if this is an MCQ or MULTI_SELECT question, empty list otherwise")
+
+class TopicList(BaseModel):
+    topics: list[str] = Field(description="List of distinct subtopics or concepts to cover in the questions")
+
+class AnswerEvaluation(BaseModel):
+    score: int = Field(description="The score awarded to the candidate out of the maximum marks")
+    feedback: str = Field(description="Constructive and professional feedback on the candidate's answer")
+    key_points_missed: list[str] = Field(description="Key points or requirements that the candidate missed, if any")
 
 logger = logging.getLogger("ai_rounds.engine")
 
@@ -130,24 +151,48 @@ class InterviewEngineService:
         previous_questions = InterviewQuestion.objects.filter(round=round_obj).order_by('asked_at')
         context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
         
+        # Determine question type / round category
+        question_type = question.question_type or round_obj.question_format or 'TEXT'
+        
+        evaluation_rules = ""
+        if question_type in ['MCQ', 'MULTI_SELECT']:
+            evaluation_rules = (
+                "CRITICAL EVALUATION RULE FOR MCQ / MULTI_SELECT QUESTIONS:\n"
+                "- The candidate's answer might simply be the selected option letter/key (e.g., 'A', 'B', 'C', 'D' or 'Option A').\n"
+                "- The candidate is NOT required to type out the entire answer or explanation.\n"
+                "- Match their selected option/letter with the correct option designated in the IDEAL ANSWER.\n"
+                "- If the selected option is correct, award them full marks (e.g., score = max marks). Do NOT deduct marks for missing explanation or working."
+            )
+        elif round_obj.round_category == 'CODING' or question_type == 'CODE':
+            evaluation_rules = (
+                "CRITICAL EVALUATION RULE FOR CODING QUESTIONS:\n"
+                "- The candidate must provide functional code or correct output matching specifications.\n"
+                "- Evaluate their code/output strictly against the IDEAL ANSWER and constraints."
+            )
+        else:
+            evaluation_rules = (
+                "CRITICAL EVALUATION RULE:\n"
+                "- Evaluate the candidate's answer based on correctness, depth, and relevance to the question."
+            )
+        
         prompt = (
             f"Evaluate the candidate's answer against the provided ideal answer/criteria.\n\n"
             f"QUESTION: {question.question_text}\n"
             f"IDEAL ANSWER: {question.ideal_answer or 'Not provided. Evaluate based on industry best practices for this role and question context.'}\n"
             f"CANDIDATE ANSWER: {answer_text}\n\n"
-            f"CONTEXT:\n{context}\n\n"
-            f"IMPORTANT: Return a JSON object with 'score' (out of {question.marks}), 'feedback', and 'key_points_missed' (array)."
+            f"{evaluation_rules}\n\n"
+            f"CONTEXT:\n{context}"
         )
         
         response_text = AIBaseService.generate_content(
             prompt=prompt,
             system_instruction="You are an expert interviewer evaluating a candidate's response. Be fair but rigorous.",
-            temperature=0.3
+            temperature=0.3,
+            response_schema=AnswerEvaluation
         )
         
         try:
-            cleaned_text = InterviewEngineService._clean_json_string(response_text)
-            data = json.loads(cleaned_text)
+            data = json.loads(response_text)
             question.evaluation = data
             question.save()
             return data
@@ -206,11 +251,13 @@ class InterviewEngineService:
     }
 
     @staticmethod
-    def generate_question_pool(application_id, round_type, designation, difficulty, round_category='NON_CODING', question_format='TEXT', programming_language='', count=5):
+    def generate_question_pool(application_id, round_type, designation, difficulty, round_category='NON_CODING', question_format='TEXT', programming_language='', count=5, coding_topics=None, coding_frameworks=None):
         from jobs.models import JobApplication
         application = JobApplication.objects.get(id=application_id)
         
-        context = InterviewPromptService.build_config_context(application, round_type, designation, difficulty, round_category)
+        context = InterviewPromptService.build_config_context(
+            application, round_type, designation, difficulty, round_category, question_format, programming_language
+        )
         
         # Get designation-specific focus (the #1 priority for question content)
         designation_focus = InterviewEngineService.DESIGNATION_FOCUS.get(designation, "")
@@ -239,27 +286,27 @@ class InterviewEngineService:
                 "- Do NOT generate theory-only, definition-based, or conceptual questions."
             )
         else:
+            lang_note = f" (specifically focusing on {programming_language})" if programming_language else ""
+            framework_note = f" and the selected frameworks/technologies: {coding_frameworks}" if coding_frameworks else ""
             category_instruction = (
-                "ROUND TYPE: NON-CODING — Generate theoretical, conceptual, or analytical questions.\n"
+                f"ROUND TYPE: NON-CODING — Generate theoretical, conceptual, or analytical questions{lang_note}{framework_note}.\n"
                 "CRITICAL RULES FOR NON-CODING ROUNDS:\n"
                 "- Questions should test understanding, knowledge, reasoning, and communication.\n"
                 "- Do NOT generate questions that require writing code or programming.\n"
-                "- Do NOT generate questions about specific programming languages or frameworks.\n"
-                "- Focus STRICTLY on the round designation topic area described above."
+                "- If a programming language or framework is specified, focus questions on their concepts, internals, and design patterns."
             )
 
         # Build format-specific instructions
         format_instruction = ""
         if question_format == 'MCQ':
             format_instruction = (
-                "Each question MUST be a multiple-choice question with 4 options (A, B, C, D). "
-                "Return each question as a string that includes the options. "
-                "Format: 'Question text\\nA) Option A\\nB) Option B\\nC) Option C\\nD) Option D'"
+                "Each question MUST be a multiple-choice question. Do NOT include option text inside the 'question' field. "
+                "Populate 'mcq_options' with exactly 4 options (A, B, C, D) and mark 'is_correct' as True for the correct option and False for others."
             )
         elif question_format == 'MULTI_SELECT':
             format_instruction = (
-                "Each question MUST be a multiple-select question (more than one correct answer). "
-                "Include 4-5 options. Format: 'Question text\\nA) Option A\\nB) Option B\\nC) Option C\\nD) Option D\\nE) Option E'"
+                "Each question MUST be a multiple-select question. Do NOT include option text inside the 'question' field. "
+                "Populate 'mcq_options' with 4-5 options and mark 'is_correct' as True for all correct options."
             )
         elif question_format == 'CODE':
             lang_note = f" in {programming_language}" if programming_language else ""
@@ -270,26 +317,7 @@ class InterviewEngineService:
             )
         else:
             format_instruction = "Each question should be an open-ended text question requiring a written answer."
-        
-        prompt = (
-            f"Generate exactly {count} UNIQUE, DIVERSE, and NON-REPETITIVE interview questions for a '{designation}' round "
-            f"at '{difficulty}' difficulty level.\n\n"
-            f"CRITICAL DIVERSITY RULES:\n"
-            f"- DO NOT repeat the same logic or theme across the pool.\n"
-            f"- If generating Aptitude, avoid always starting with 'shopkeeper' profit/loss or basic number series. "
-            f"Mix it up with Probability, Time & Work, Data Sufficiency, etc.\n"
-            f"- Each of the {count} questions MUST cover a different sub-topic within the focus area.\n"
-            f"- Ensure the questions are creative and professionally phrased.\n\n"
-            f"{designation_instruction}"
-            f"{category_instruction}\n\n"
-            f"QUESTION FORMAT: {format_instruction}\n\n"
-            f"CONTEXT:\n{context}\n\n"
-            f"IMPORTANT: For each question, provide an 'ideal_answer' or 'evaluation_criteria' that explains what a perfect answer should contain. "
-            f"Return ONLY a JSON object with a single key 'questions' containing "
-            f"an array of objects. Example:\n"
-            f'{{"questions": [{{"question": "What is Python?", "ideal_answer": "Python is a high-level, interpreted language known for..."}}, ...]}}'
-        )
-        
+
         # Category-specific system prompts
         if round_category == 'CODING':
             system_prompt = (
@@ -298,8 +326,7 @@ class InterviewEngineService:
                 "Do NOT use the candidate's resume for coding rounds — focus purely on the role's technical requirements. "
                 "Questions must be practical coding problems, NOT theoretical definitions. "
                 "For each question, generate a detailed 'ideal_answer' showing the expected code solution or approach. "
-                "Return ONLY valid JSON with the key 'questions' containing an array of objects with 'question' and 'ideal_answer' keys. "
-                "No markdown, no extra text. DO NOT include unescaped newlines or tabs inside the JSON strings; use \\n and \\t instead."
+                "Return ONLY valid JSON. Do not include unescaped newlines or tabs inside the JSON strings; use \\n and \\t instead."
             )
         else:
             system_prompt = (
@@ -309,45 +336,135 @@ class InterviewEngineService:
                 "If the round is HR, generate ONLY HR questions. If Behavioral, ONLY behavioral. "
                 "NEVER let the job's tech stack (Python, Java, etc.) influence non-technical rounds. "
                 "For each question, also generate a detailed 'ideal_answer' for evaluation. "
-                "Return ONLY valid JSON with the key 'questions' containing an array of objects with 'question' and 'ideal_answer' keys. "
-                "No markdown, no extra text. DO NOT include unescaped newlines or tabs inside the JSON strings; use \\n and \\t instead."
+                "Return ONLY valid JSON. Do not include unescaped newlines or tabs inside the JSON strings; use \\n and \\t instead."
             )
-        
+
         logger.info(f"Generating {count} questions: designation={designation}, category={round_category}, format={question_format}")
+
+        # Prepare topics list
+        topics = []
+        if coding_topics:
+            if isinstance(coding_topics, list):
+                topics.extend(coding_topics)
+            elif isinstance(coding_topics, str) and coding_topics.strip():
+                topics.extend([t.strip() for t in coding_topics.split(',') if t.strip()])
         
-        # Retry logic: attempt up to 2 times (AI can sometimes return malformed JSON)
-        last_error = None
-        for attempt in range(2):
+        # Truncate if we already have enough/too many
+        topics = topics[:count]
+        remaining_count = count - len(topics)
+
+        # Step 1: Generate remaining distinct subtopics to ensure diversity and parallelize question generation
+        if remaining_count > 0:
+            system_prompt_topics = (
+                "You are an expert interview designer. "
+                f"Given the job requirements and round designation ({designation_focus or designation}), "
+                f"generate a list of exactly {remaining_count} additional distinct focus subtopics/concepts that should be tested. "
+                "Each subtopic should be specific and unique to ensure a well-rounded assessment of the candidate."
+            )
+
+            existing_topics_str = f" Ensure they are different from these already selected topics: {', '.join(topics)}." if topics else ""
+            prompt_topics = (
+                f"Generate a list of exactly {remaining_count} additional distinct focus subtopics for a '{designation}' round. "
+                f"{existing_topics_str} "
+                f"Difficulty level: {difficulty}.\n\n"
+                f"Context:\n{context}"
+            )
+
             try:
-                response_text = AIBaseService.generate_content(
-                    prompt=prompt,
-                    system_instruction=system_prompt,
-                    temperature=0.8 if attempt > 0 else 0.9  # Higher temp for variety
+                topics_response = AIBaseService.generate_content(
+                    prompt=prompt_topics,
+                    system_instruction=system_prompt_topics,
+                    temperature=0.5,
+                    response_schema=TopicList
                 )
-                
-                if not response_text or not response_text.strip():
-                    logger.warning(f"AI returned empty response (attempt {attempt + 1})")
-                    last_error = ValueError("AI returned empty response")
-                    continue
-                
-                logger.info(f"AI response (attempt {attempt + 1}, first 300 chars): {response_text[:300]}")
-                
-                cleaned_text = InterviewEngineService._clean_json_string(response_text)
-                data = json.loads(cleaned_text)
-                
-                questions = data.get('questions', [])
-                if not questions:
-                    logger.warning(f"AI returned empty questions array (attempt {attempt + 1})")
-                    last_error = ValueError("AI returned no questions")
-                    continue
-                
-                return questions
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON parse failed (attempt {attempt + 1}): {e}\nRaw: {response_text[:500] if response_text else 'EMPTY'}")
-                last_error = e
+                topics_data = json.loads(topics_response)
+                generated_topics = topics_data.get("topics", [])
+                topics.extend(generated_topics)
             except Exception as e:
-                logger.error(f"Question generation failed (attempt {attempt + 1}): {e}")
-                last_error = e
+                logger.error(f"Failed to generate distinct topics: {e}. Falling back to default names.")
+
+        if not topics or len(topics) < count:
+            if not topics:
+                topics = []
+            topics = topics + [f"{designation} Subtopic {i}" for i in range(len(topics), count)]
+
+        # Prepare framework rules for prompt
+        frameworks_focus = ""
+        if coding_frameworks:
+            if isinstance(coding_frameworks, list):
+                frameworks_focus = f"The question MUST specifically use or involve one or more of these frameworks: {', '.join(coding_frameworks)}."
+            elif isinstance(coding_frameworks, str) and coding_frameworks.strip():
+                frameworks_focus = f"The question MUST specifically use or involve these frameworks: {coding_frameworks}."
+
+        # Step 2: Generate questions in parallel
+        def generate_single_question(topic, index):
+            framework_rule = f"\n- {frameworks_focus}" if frameworks_focus else ""
+            lang_rule = f"\n- The question and the solution MUST be written strictly in and/or for the '{programming_language}' programming language." if programming_language else ""
+            single_prompt = (
+                f"Generate exactly 1 UNIQUE interview question on the specific subtopic: '{topic}'.\n\n"
+                f"CRITICAL RULES:\n"
+                f"- The question must be distinct and creative.\n"
+                f"- Difficulty level: {difficulty}.{lang_rule}{framework_rule}\n"
+                f"{designation_instruction}"
+                f"{category_instruction}\n\n"
+                f"QUESTION FORMAT: {format_instruction}\n\n"
+                f"CONTEXT:\n{context}"
+            )
+            
+            lang_focus = f" using '{programming_language}'" if programming_language else ""
+            framework_focus_text = f" and framework '{', '.join(coding_frameworks) if isinstance(coding_frameworks, list) else coding_frameworks}'" if coding_frameworks else ""
+            single_system_prompt = system_prompt + f"\nFocus strictly on generating a question about the subtopic: '{topic}'{lang_focus}{framework_focus_text}."
+            
+            # Introduce a staggered initial delay based on thread index to prevent concurrent SSL handshakes
+            if index > 0:
+                time.sleep(index * 0.35)
+
+            last_err = None
+            for attempt in range(3):
+                try:
+                    res_text = AIBaseService.generate_content(
+                        prompt=single_prompt,
+                        system_instruction=single_system_prompt,
+                        temperature=0.7 + (attempt * 0.1),
+                        response_schema=GeneratedQuestion
+                    )
+                    
+                    data = json.loads(res_text)
+                    return {
+                        "question": data.get("question", ""),
+                        "ideal_answer": data.get("ideal_answer", ""),
+                        "mcq_options": data.get("mcq_options", [])
+                    }
+                except Exception as ex:
+                    last_err = ex
+                    logger.warning(f"Failed to generate question for topic '{topic}' (attempt {attempt + 1}): {ex}")
+                    import random
+                    time.sleep(1.0 + random.uniform(0.2, 0.8))
+            
+            raise last_err
+
+        questions = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=count) as executor:
+            futures = {executor.submit(generate_single_question, topic, idx): idx for idx, topic in enumerate(topics[:count])}
+            for future in futures:
+                try:
+                    q_data = future.result()
+                    questions.append(q_data)
+                except Exception as e:
+                    logger.error(f"Failed to generate question for a thread: {e}")
         
-        raise ValueError(f"AI question generation failed after retries: {last_error}")
+        if len(questions) < count:
+            logger.warning(f"Parallel generation only yielded {len(questions)}/{count} questions. Falling back to retry generation.")
+            remaining = count - len(questions)
+            for i in range(remaining):
+                try:
+                    fallback_topic = topics[len(questions)] if len(questions) < len(topics) else f"{designation} Fallback {i}"
+                    q_data = generate_single_question(fallback_topic, len(questions))
+                    questions.append(q_data)
+                except Exception as e:
+                    logger.error(f"Fallback generation also failed: {e}")
+
+        if not questions:
+            raise ValueError("AI question generation failed: could not generate any questions.")
+
+        return questions
