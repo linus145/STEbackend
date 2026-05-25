@@ -1,5 +1,5 @@
 from rest_framework import viewsets, filters, permissions
-from django.db.models import Count
+from django.db.models import Count, Q
 from organization.models import Department, Designation, Organization
 from organization.serializers import (
     DepartmentSerializer,
@@ -220,7 +220,7 @@ class DepartmentViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             # Re-fetch after seeding
             qs = super().get_queryset()
 
-        return qs.annotate(employee_count=Count("employees"))
+        return qs.annotate(employee_count=Count("employees", filter=Q(employees__is_deleted=False)))
 
 
 class DesignationViewSet(StartupTenantMixin, viewsets.ModelViewSet):
@@ -296,7 +296,7 @@ class DesignationViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             # Re-fetch after seeding
             qs = super().get_queryset()
 
-        return qs.annotate(employee_count=Count("employees"))
+        return qs.annotate(employee_count=Count("employees", filter=Q(employees__is_deleted=False)))
 
 
 class OrganizationDetailView(APIView):

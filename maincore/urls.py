@@ -129,6 +129,7 @@ urlpatterns = [
     path("api/AIAgents/", include("AIAgents.urls")),
     path("api/autonomousagent1/", include("Ahrmagent1.urls")),
     path("api/hrmagent2/", include("Ahrmagent2.urls")),
+    path("api/agentsettings/", include("agentsettings.urls")),
 
     #HR
     path("api/employees/", include("employees.urls")),

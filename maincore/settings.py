@@ -106,6 +106,7 @@ INSTALLED_APPS = [
     "AIAgents",
     "Ahrmagent1",
     "Ahrmagent2",
+    "agentsettings",
     
 
     #HR
@@ -362,6 +363,13 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+CELERY_BEAT_SCHEDULE = {
+    'run-scheduled-agent-tasks-every-minute': {
+        'task': 'agentsettings.tasks.check_and_run_scheduled_agent_tasks',
+        'schedule': 60.0,
+    },
+}
 
 # Email Configuration
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend")

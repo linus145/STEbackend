@@ -116,8 +116,8 @@ B. HR SUITE (SPA with Tabbed Navigation)
 * Base Path: /Hrtools
 * Navigation Sidebar Tabs (Use data-agent selectors to click):
   - "nav-tab-hr-dashboard" → HR metrics, general summaries, and activity lists.
-  - "nav-tab-hr-onboarding" → Lifecycle onboarding, employee check-in queues, and onboarding tasks.
-  - "nav-tab-hr-employees" → Employee directory, profiles, salary updates, and detail lookups.
+  - "nav-tab-hr-onboarding" → Lifecycle onboarding, employee check-in queues, and onboarding tasks. Contains the "Move back to Interview Pipeline" button (`onboarding-move-back-btn`) to send a candidate back to recruitment/interview pipeline. If the user asks to move/make an onboarded/onboarding employee back to the interview or recruitment stage/section, navigate to this tab first and click the "Move back to Interview Pipeline" button next to that employee. Do NOT navigate to the Recruiter Suite's /recruiter/AIInterviews page.
+  - "nav-tab-hr-employees" → Employee directory, profiles, salary updates, and detail lookups. Note: This tab does NOT contain the "Move back to Interview Pipeline" button; it only exists on the onboarding tab.
   - Collapsible Navigation Groups:
     - "nav-parent-attendance" → Attendance section parent button. Click to expand sub-menu tabs:
       - "nav-tab-hr-sub-attendance-activity" → Live activity feed. Shows records list with delete action button: `attendance-delete-btn-{record.id}`.
@@ -189,6 +189,8 @@ B. HR SUITE (SPA with Tabbed Navigation)
   3. Failsafe: You can also use "open_new_tab" with value "/Hrtools" to go directly to the HR Tools.
 * To move from HR Suite to Recruiter Suite:
   - Click the header button/link with text "Recruiter Panel →" pointing to "/recruiter".
+* ONBOARDING MOVE-BACK RULE: If the user asks to move/make an onboarding/onboard employee "back to the interview section" or "back to the interview pipeline", do NOT transition to the Recruiter Suite or the AI Interview Pipeline. Instead, stay in the HR Suite (navigate to "/Hrtools" if not there), click the Onboarding tab ("nav-tab-hr-onboarding"), and click the "Move back to Interview Pipeline" button (`onboarding-move-back-btn`) next to that employee. To click this button for the Nth candidate, use the selector "onboarding-move-back-btn-N" (0-indexed, e.g. "onboarding-move-back-btn" for the first candidate).
+* DATABASE UUID EXCLUSION RULE (CRITICAL): Do NOT output, reference, or use database UUIDs (like "985f7952-3c58-41a2-b08b-a79b35cc2e86") in any action selectors, values, or explanations. Every dynamic card, list row, or button in the Onboarding and Employee directories is auto-indexed sequentially (e.g. "onboarding-move-back-btn" for the first card/row, "onboarding-move-back-btn-1" for the second card/row, and so on). Never construct selectors containing UUIDs.
 
 ==================================================
 4. RECRUITMENT SCREENING WORKFLOW
@@ -540,6 +542,9 @@ MANDATORY USER-SELECTION & CONFIRMATION RULES (CRITICAL):
   - NEVER select one autonomously or proceed blindly.
   - NEVER assume the user wants the first one.
   - You MUST use the "ask_user" action to present the exact choices (e.g., candidate names or job titles) to the user and ask them to select one to proceed with. Only proceed with the choice the user confirms in their response.
+
+UUID EXCLUSION CONSTRAINT (CRITICAL):
+- Under NO circumstances should the agent ever output, reference, or use a database UUID (like "985f7952-3c58-41a2-b08b-a79b35cc2e86") in any action selectors, values, or explanations. Every dynamic card, list row, or button in the Onboarding and Employee directories is auto-indexed sequentially (e.g. "onboarding-move-back-btn" for the first card/row, "onboarding-move-back-btn-1" for the second card/row, and so on). Never construct or use selectors containing UUIDs.
 """
 
         try:
