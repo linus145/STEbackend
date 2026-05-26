@@ -39,7 +39,8 @@ class EmployeeService:
             if 'localhost' not in host_meta and '127.0.0.1' not in host_meta and absolute_uri_fn:
                 login_url = absolute_uri_fn('/employee/login').replace('api.', '')
                 
-        subject = f"Welcome to B2linq, {employee.first_name}! Your Employee Portal Login"
+        org_name = employee.organization.name if employee.organization else "B2linq"
+        subject = f"Welcome to {org_name}, {employee.first_name}! Your Employee Portal Login"
         
         # Fallback text message
         pw_str = f"Temporary Password: {temp_password}" if temp_password else "Use the password provided by your HR operations manager, or request a reset."
@@ -47,7 +48,7 @@ class EmployeeService:
 
 Welcome to the team! Your portal login account has been initialized.
 
-You can now log in to the B2linq Employee Hub to view your attendance logs, submit check-ins/outs, and post leave requests.
+You can now log in to the {org_name} Employee Hub to view your attendance logs, submit check-ins/outs, and post leave requests.
 
 Employee Portal Link: {login_url}
 Username (Portal Username): {employee.portal_username}
@@ -65,6 +66,7 @@ HR Operations Team
             "portal_username": employee.portal_username,
             "login_url": login_url,
             "temp_password": temp_password,
+            "company_name": org_name,
         }
         
         html_message = render_to_string("emails/credentials_invite.html", context)
@@ -72,11 +74,13 @@ HR Operations Team
         email_sent = False
         try:
             from useraccounts.tasks import send_email_async
+            from_email_addr = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.com')
+            from_email_formatted = f"{org_name} <{from_email_addr}>"
             send_email_async.delay(
                 subject=subject,
                 message=message,
                 recipient_list=[employee.email],
-                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.com'),
+                from_email=from_email_formatted,
                 html_message=html_message
             )
             email_sent = True
