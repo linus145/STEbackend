@@ -3,7 +3,8 @@ from .models import Startup, CompanyProfile
 
 @admin.register(CompanyProfile)
 class CompanyProfileAdmin(admin.ModelAdmin):
-    list_display = ("company_name", "owner", "industry", "company_size", "location", "is_approved", "is_genuine", "created_at")
+    list_editable = ('is_deleted',)
+    list_display = ("company_name", "owner", "industry", "company_size", "location", "is_approved", "is_genuine", "created_at", 'is_deleted')
     list_filter = ("is_approved", "is_genuine", "industry", "company_size", "is_deleted")
     search_fields = ("company_name", "owner__email", "industry")
     readonly_fields = ("id", "created_at", "updated_at")
@@ -11,8 +12,9 @@ class CompanyProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Startup)
 class StartupAdmin(admin.ModelAdmin):
-    list_display = ('name', 'industry', 'stage', 'get_founder_email', 'seeking_amount')
-    list_filter = ('industry', 'stage')
+    list_editable = ('is_deleted',)
+    list_display = ('name', 'industry', 'stage', 'get_founder_email', 'seeking_amount', 'is_deleted')
+    list_filter = ('industry', 'stage', 'is_deleted')
     search_fields = ('name', 'pitch', 'founder__email')
     readonly_fields = ('created_at', 'updated_at')
     

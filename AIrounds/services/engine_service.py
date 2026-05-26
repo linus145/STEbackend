@@ -21,10 +21,8 @@ class GeneratedQuestion(BaseModel):
 class TopicList(BaseModel):
     topics: list[str] = Field(description="List of distinct subtopics or concepts to cover in the questions")
 
-class AnswerEvaluation(BaseModel):
-    score: int = Field(description="The score awarded to the candidate out of the maximum marks")
-    feedback: str = Field(description="Constructive and professional feedback on the candidate's answer")
-    key_points_missed: list[str] = Field(description="Key points or requirements that the candidate missed, if any")
+# Backward-compatible re-export — AnswerEvaluation now lives in evaluation.py
+from AIrounds.services.evaluation import AnswerEvaluation  # noqa: F401
 
 logger = logging.getLogger("ai_rounds.engine")
 
@@ -137,94 +135,22 @@ class InterviewEngineService:
             logger.error(f"Failed to parse AI question response: {e}")
             raise ValueError("AI failed to generate a valid question.")
 
+    # ──────────────────────────────────────────────
+    # Delegate evaluation methods to InterviewEvaluationService
+    # (kept for backward compatibility — callers should migrate)
+    # ──────────────────────────────────────────────
+
     @staticmethod
     def evaluate_answer(session_id, round_id, question_id, answer_text):
-        session = InterviewSession.objects.get(id=session_id)
-        round_obj = InterviewRound.objects.get(id=round_id)
-        question = InterviewQuestion.objects.get(id=question_id)
-        
-        # Update question with answer
-        question.candidate_answer = answer_text
-        question.answered_at = timezone.now()
-        question.save()
-        
-        previous_questions = InterviewQuestion.objects.filter(round=round_obj).order_by('asked_at')
-        context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
-        
-        # Determine question type / round category
-        question_type = question.question_type or round_obj.question_format or 'TEXT'
-        
-        evaluation_rules = ""
-        if question_type in ['MCQ', 'MULTI_SELECT']:
-            evaluation_rules = (
-                "CRITICAL EVALUATION RULE FOR MCQ / MULTI_SELECT QUESTIONS:\n"
-                "- The candidate's answer might simply be the selected option letter/key (e.g., 'A', 'B', 'C', 'D' or 'Option A').\n"
-                "- The candidate is NOT required to type out the entire answer or explanation.\n"
-                "- Match their selected option/letter with the correct option designated in the IDEAL ANSWER.\n"
-                "- If the selected option is correct, award them full marks (e.g., score = max marks). Do NOT deduct marks for missing explanation or working."
-            )
-        elif round_obj.round_category == 'CODING' or question_type == 'CODE':
-            evaluation_rules = (
-                "CRITICAL EVALUATION RULE FOR CODING QUESTIONS:\n"
-                "- The candidate must provide functional code or correct output matching specifications.\n"
-                "- Evaluate their code/output strictly against the IDEAL ANSWER and constraints."
-            )
-        else:
-            evaluation_rules = (
-                "CRITICAL EVALUATION RULE:\n"
-                "- Evaluate the candidate's answer based on correctness, depth, and relevance to the question."
-            )
-        
-        prompt = (
-            f"Evaluate the candidate's answer against the provided ideal answer/criteria.\n\n"
-            f"QUESTION: {question.question_text}\n"
-            f"IDEAL ANSWER: {question.ideal_answer or 'Not provided. Evaluate based on industry best practices for this role and question context.'}\n"
-            f"CANDIDATE ANSWER: {answer_text}\n\n"
-            f"{evaluation_rules}\n\n"
-            f"CONTEXT:\n{context}"
-        )
-        
-        response_text = AIBaseService.generate_content(
-            prompt=prompt,
-            system_instruction="You are an expert interviewer evaluating a candidate's response. Be fair but rigorous.",
-            temperature=0.3,
-            response_schema=AnswerEvaluation
-        )
-        
-        try:
-            data = json.loads(response_text)
-            question.evaluation = data
-            question.save()
-            return data
-        except Exception as e:
-            logger.error(f"Failed to parse AI evaluation response: {e}")
-            raise ValueError("AI failed to evaluate the answer.")
+        from AIrounds.services.evaluation import InterviewEvaluationService
+        return InterviewEvaluationService.evaluate_answer(session_id, round_id, question_id, answer_text)
 
     @staticmethod
     def generate_round_summary(session_id, round_id):
-        session = InterviewSession.objects.get(id=session_id)
-        round_obj = InterviewRound.objects.get(id=round_id)
-        previous_questions = InterviewQuestion.objects.filter(round=round_obj).order_by('asked_at')
-        
-        context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
-        prompt = f"The round is complete. Generate a FINAL_ROUND_SUMMARY based on the context.\n\nCONTEXT:\n{context}"
-        
-        response_text = AIBaseService.generate_content(
-            prompt=prompt,
-            system_instruction=InterviewPromptService.get_system_prompt(),
-            temperature=0.3
-        )
-        
-        try:
-            cleaned_text = InterviewEngineService._clean_json_string(response_text)
-            data = json.loads(cleaned_text)
-            round_obj.round_score = data.get('overall_score', 0)
-            round_obj.status = 'COMPLETED'
-            round_obj.save()
-            return data
-        except Exception as e:
-            logger.error(f"Failed to parse AI summary response: {e}")
-            raise ValueError("AI failed to generate a round summary.")
+        from AIrounds.services.evaluation import InterviewEvaluationService
+        return InterviewEvaluationService.generate_round_summary(session_id, round_id)
+
+
     # Maps round designations to their specific question focus areas
     # This ensures AI generates the RIGHT kind of questions for each designation
     DESIGNATION_FOCUS = {
@@ -463,8 +389,5 @@ class InterviewEngineService:
                     questions.append(q_data)
                 except Exception as e:
                     logger.error(f"Fallback generation also failed: {e}")
-
-        if not questions:
-            raise ValueError("AI question generation failed: could not generate any questions.")
 
         return questions

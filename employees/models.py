@@ -93,6 +93,7 @@ class Employee(SoftDeleteModel):
     )
     
     portal_username = models.CharField(max_length=150, unique=True, null=True, blank=True, db_index=True)
+    portal_password = models.CharField(max_length=255, blank=True, default='')
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

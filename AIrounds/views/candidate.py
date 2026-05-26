@@ -62,6 +62,15 @@ class CandidateExamAccessView(APIView, ResponseMixin):
                 "questions": questions,
             })
 
+        # Include voice agent API keys only when a VIDEO round exists
+        voice_agent_keys = {}
+        if any(rnd.question_format == 'VIDEO' for rnd in session.rounds.all()):
+            from django.conf import settings as dj_settings
+            voice_agent_keys = {
+                "deepgram_api_key": dj_settings.DEEPGRAM_API_KEY,
+                "gemini_api_key": dj_settings.GEMINI_API_KEY,
+            }
+
         return self.build_response("success", "Exam data loaded.", {
             "session_id": str(session.id),
             "job_title": session.job_title,
@@ -69,6 +78,7 @@ class CandidateExamAccessView(APIView, ResponseMixin):
             "status": link.status,
             "expires_at": link.expires_at.isoformat() if link.expires_at else None,
             "rounds": rounds_data,
+            **voice_agent_keys,
         })
 
     def post(self, request, token):
@@ -168,6 +178,15 @@ class CandidateExamLoginView(APIView, ResponseMixin):
                 "questions": questions,
             })
 
+        # Include voice agent API keys only when a VIDEO round exists
+        voice_agent_keys = {}
+        if any(rnd.question_format == 'VIDEO' for rnd in session.rounds.all()):
+            from django.conf import settings as dj_settings
+            voice_agent_keys = {
+                "deepgram_api_key": dj_settings.DEEPGRAM_API_KEY,
+                "gemini_api_key": dj_settings.GEMINI_API_KEY,
+            }
+
         return self.build_response("success", "Login successful.", {
             "session_id": str(session.id),
             "exam_token": str(link.token),
@@ -176,6 +195,7 @@ class CandidateExamLoginView(APIView, ResponseMixin):
             "status": link.status,
             "expires_at": link.expires_at.isoformat() if link.expires_at else None,
             "rounds": rounds_data,
+            **voice_agent_keys,
         })
 
 

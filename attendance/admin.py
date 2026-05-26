@@ -7,12 +7,14 @@ class WorkSessionInline(admin.TabularInline):
 
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
-    list_display = ('name', 'startup', 'start_time', 'end_time')
-    list_filter = ('startup',)
+    list_editable = ('is_deleted',)
+    list_display = ('name', 'startup', 'start_time', 'end_time', 'is_deleted')
+    list_filter = ('startup', 'is_deleted')
 
 @admin.register(Attendance)
 class AttendanceAdmin(admin.ModelAdmin):
-    list_display = ('employee', 'date', 'status', 'total_work_hours', 'is_late')
-    list_filter = ('startup', 'status', 'date')
+    list_editable = ('is_deleted',)
+    list_display = ('employee', 'date', 'status', 'total_work_hours', 'is_late', 'is_deleted')
+    list_filter = ('startup', 'status', 'date', 'is_deleted')
     search_fields = ('employee__first_name', 'employee__last_name')
     inlines = [WorkSessionInline]

@@ -3,16 +3,18 @@ from .models import ChatRoom, Message
 
 @admin.register(ChatRoom)
 class ChatRoomAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'is_group', 'created_at', 'updated_at')
-    list_filter = ('is_group', 'created_at')
+    list_editable = ('is_deleted',)
+    list_display = ('id', 'name', 'is_group', 'created_at', 'updated_at', 'is_deleted')
+    list_filter = ('is_group', 'created_at', 'is_deleted')
     search_fields = ('id', 'name', 'participants__email')
     filter_horizontal = ('participants',)
     readonly_fields = ('id', 'created_at', 'updated_at')
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ('id', 'room', 'sender', 'text_snippet', 'created_at')
-    list_filter = ('created_at', 'room')
+    list_editable = ('is_deleted',)
+    list_display = ('id', 'room', 'sender', 'text_snippet', 'created_at', 'is_deleted')
+    list_filter = ('created_at', 'room', 'is_deleted')
     search_fields = ('text', 'sender__email', 'room__id')
     readonly_fields = ('id', 'created_at')
 

@@ -2,6 +2,7 @@ import logging
 from celery import shared_task
 from AIrounds.models import InterviewRound, InterviewQuestion, InterviewSession
 from AIrounds.services.engine_service import InterviewEngineService
+from AIrounds.services.evaluation import InterviewEvaluationService
 
 logger = logging.getLogger("ai_rounds.tasks")
 
@@ -75,7 +76,7 @@ def task_evaluate_answer(session_id, round_id, question_id, answer_text):
     Celery task to evaluate a candidate's answer using AI.
     """
     try:
-        eval_data = InterviewEngineService.evaluate_answer(
+        eval_data = InterviewEvaluationService.evaluate_answer(
             session_id, round_id, question_id, answer_text
         )
         return eval_data

@@ -3,8 +3,9 @@ from .models import News
 
 @admin.register(News)
 class NewsAdmin(admin.ModelAdmin):
-    list_display = ('title','short_title', 'author', 'is_popular', 'is_trending', 'is_top_news', 'created_at')
-    list_filter = ('is_popular', 'is_trending', 'is_top_news', 'created_at')
+    list_editable = ('is_deleted',)
+    list_display = ('title','short_title', 'author', 'is_popular', 'is_trending', 'is_top_news', 'created_at', 'is_deleted')
+    list_filter = ('is_popular', 'is_trending', 'is_top_news', 'created_at', 'is_deleted')
     search_fields = ('title', 'content', 'author__email')
     ordering = ('-created_at',)
     

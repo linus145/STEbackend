@@ -74,7 +74,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'employment_type', 'reporting_manager', 'salary', 'avatar', 
             'address', 'status', 'profile_details', 'job_application', 
             'aadhaar_detail', 'pan_detail', 'joining_detail', 'bank_detail',
-            'created_at', 'updated_at', 'password', 'portal_username'
+            'created_at', 'updated_at', 'portal_username', 'portal_password', 'password'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
@@ -100,15 +100,12 @@ class EmployeeSerializer(serializers.ModelSerializer):
             portal_username = unique_uname
             validated_data['portal_username'] = portal_username
 
-        # 2. Automatically generate secure password if not provided
-        password = validated_data.pop('password', None)
-        temp_password = None
-        if not password:
-            import random
-            import string
-            chars = string.ascii_letters + string.digits
-            temp_password = 'B2lq_' + ''.join(random.choice(chars) for _ in range(8))
-            password = temp_password
+        # 2. Automatically generate a placeholder password for the User account
+        #    (The actual password will be set later via the send-credentials endpoint)
+        import random
+        import string
+        chars = string.ascii_letters + string.digits
+        auto_password = 'B2lq_' + ''.join(random.choice(chars) for _ in range(8))
             
         # 3. Securely register the User account for authorization
         from django.contrib.auth import get_user_model
@@ -118,7 +115,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
         if not user:
             user = User.objects.create_user(
                 email=email,
-                password=password,
+                password=auto_password,
                 first_name=validated_data.get('first_name', ''),
                 last_name=validated_data.get('last_name', ''),
                 role='OPERATIONS'
@@ -137,27 +134,15 @@ class EmployeeSerializer(serializers.ModelSerializer):
             user.first_name = validated_data.get('first_name', '')
             user.last_name = validated_data.get('last_name', '')
             user.role = 'OPERATIONS'
-            user.set_password(password)
+            user.set_password(auto_password)
             user.save()
         validated_data['user'] = user
         
         instance = super().create(validated_data)
         
-        # 4. Automatically dispatch welcome credentials email with the generated temporary password!
-        try:
-            from employees.services import EmployeeService
-            request = self.context.get('request')
-            host_meta = request.META.get('HTTP_HOST') if request else None
-            absolute_uri_fn = request.build_absolute_uri if request else None
-            
-            EmployeeService.send_credentials_email(
-                employee=instance,
-                host_meta=host_meta,
-                absolute_uri_fn=absolute_uri_fn,
-                temp_password=temp_password
-            )
-        except Exception as e:
-            print(f"Failed to auto-send employee onboarding credentials: {e}")
+        # NOTE: No credentials email is sent during creation.
+        # The HR admin should go to the employee details page, set the password,
+        # and use the "Set Password & Send Credentials" button to send the email.
         
         if aadhaar_data is not None:
             EmployeeAadhaarDetail.objects.create(employee=instance, organization=instance.organization, **aadhaar_data)
@@ -193,11 +178,15 @@ class EmployeeSerializer(serializers.ModelSerializer):
         
         password = validated_data.pop('password', None)
         if password:
+            # Store plaintext password for HR admin visibility
+            instance.portal_password = password
+            instance.save()
+            
+            # Set hashed password on the Django User account
             from django.contrib.auth import get_user_model
             User = get_user_model()
-            email = validated_data.get('email', instance.email)
-            user = instance.user
-            if not user:
+            if not instance.user:
+                email = validated_data.get('email', instance.email)
                 user = User.objects.filter(email=email).first()
                 if not user:
                     user = User.objects.create_user(
@@ -208,31 +197,33 @@ class EmployeeSerializer(serializers.ModelSerializer):
                         role='OPERATIONS'
                     )
                 else:
-                    # Clear link on any soft-deleted employees to prevent IntegrityError
                     Employee.all_objects.filter(user=user, is_deleted=True).update(user=None)
-                    
-                    # Check if already linked to another ACTIVE employee
                     if Employee.objects.filter(user=user).exclude(id=instance.id).exists():
                         raise serializers.ValidationError({
                             "email": "This email is already registered and linked to an active employee profile."
                         })
-                        
-                    # Update user's name and role to employee operations defaults
-                    user.first_name = validated_data.get('first_name', instance.first_name)
-                    user.last_name = validated_data.get('last_name', instance.last_name)
-                    user.role = 'OPERATIONS'
                     user.set_password(password)
                     user.save()
                 instance.user = user
                 instance.save()
             else:
-                user.set_password(password)
-                if 'email' in validated_data:
-                    user.email = validated_data['email']
-                user.first_name = validated_data.get('first_name', instance.first_name)
-                user.last_name = validated_data.get('last_name', instance.last_name)
-                user.role = 'OPERATIONS'
-                user.save()
+                instance.user.set_password(password)
+                instance.user.save()
+            
+            # Send credentials email with the actual password
+            try:
+                from employees.services import EmployeeService
+                request = self.context.get('request')
+                host_meta = request.META.get('HTTP_HOST') if request else None
+                absolute_uri_fn = request.build_absolute_uri if request else None
+                EmployeeService.send_credentials_email(
+                    employee=instance,
+                    host_meta=host_meta,
+                    absolute_uri_fn=absolute_uri_fn,
+                    temp_password=password
+                )
+            except Exception as e:
+                print(f"Failed to send credentials email: {e}")
 
         instance = super().update(instance, validated_data)
         

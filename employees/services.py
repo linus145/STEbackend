@@ -71,17 +71,17 @@ HR Operations Team
         
         email_sent = False
         try:
-            send_mail(
-                subject,
-                message,
-                getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.com'),
-                [employee.email],
-                fail_silently=False,
+            from useraccounts.tasks import send_email_async
+            send_email_async.delay(
+                subject=subject,
+                message=message,
+                recipient_list=[employee.email],
+                from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.com'),
                 html_message=html_message
             )
             email_sent = True
         except Exception as e:
-            print(f"SMTP Error: {e}")
+            print(f"Failed to queue Celery email task: {e}")
             
         return {
             "email": employee.email,

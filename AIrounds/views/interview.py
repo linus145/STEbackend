@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from AIrounds.models import InterviewRound, InterviewQuestion, InterviewSession
 from AIrounds.services.engine_service import InterviewEngineService
+from AIrounds.services.evaluation import InterviewEvaluationService
 from AIrounds.services.state_service import InterviewStateService
 from AIrounds.services.orchestrator import InterviewOrchestrator
 from AIrounds.services.reporter import InterviewReporter
@@ -111,7 +112,7 @@ class SubmitAnswerView(APIView, ResponseMixin):
             round_obj = question.round
             session_id = round_obj.session.id
             
-            evaluation = InterviewEngineService.evaluate_answer(
+            evaluation = InterviewEvaluationService.evaluate_answer(
                 session_id, round_obj.id, question_id, answer_text
             )
             return self.build_response("success", "Answer evaluated.", evaluation)
@@ -130,7 +131,7 @@ class GetRoundSummaryView(APIView, ResponseMixin):
             round_obj = InterviewRound.objects.get(id=round_id)
             session_id = round_obj.session.id
             
-            summary = InterviewEngineService.generate_round_summary(session_id, round_id)
+            summary = InterviewEvaluationService.generate_round_summary(session_id, round_id)
             return self.build_response("success", "Round summary generated.", summary)
         except InterviewRound.DoesNotExist:
             return self.build_response("error", "Round not found.", {}, status.HTTP_404_NOT_FOUND)

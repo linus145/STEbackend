@@ -4,8 +4,9 @@ from useraccounts.models import CustomUser
 
 @admin.register(CustomUser)
 class CustomUserAdmin(BaseUserAdmin):
-    list_display = ('email', 'first_name', 'last_name', 'role', 'is_premium', 'is_top_voice', 'is_verified')
-    list_filter = ('role', 'is_premium', 'is_top_voice', 'is_verified', 'is_staff', 'is_active')
+    list_editable = ('is_deleted',)
+    list_display = ('email', 'first_name', 'last_name', 'role', 'is_premium', 'is_top_voice', 'is_verified', 'is_deleted')
+    list_filter = ('role', 'is_premium', 'is_top_voice', 'is_verified', 'is_staff', 'is_active', 'is_deleted')
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Personal Info', {'fields': ('first_name', 'last_name', 'phone_number', 'role')}),

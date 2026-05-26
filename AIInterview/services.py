@@ -1,66 +1,41 @@
-from rest_framework import status
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
 import json
-from django.conf import settings as dj_settings
+import logging
 from django.utils import timezone
+from django.conf import settings as dj_settings
 from AIrounds.models import CandidateInterviewLink, InterviewRound, InterviewQuestion
 from AIrounds.services.ai_base import AIBaseService
-from AIrounds.views.base import ResponseMixin
 
-class AIInterviewSettingsView(APIView, ResponseMixin):
+logger = logging.getLogger(__name__)
+
+class AIInterviewService:
     """
-    Serves Deepgram Voice Agent settings and Dynamic LLM Prompt built on the backend.
+    Core service class containing the settings generation, prompt construction,
+    voice transcript splitting, and automated/AI evaluation logic for the AIInterview app.
     """
-    permission_classes = (AllowAny,)
-    authentication_classes = []
 
-    def get(self, request):
-        exam_token = request.query_params.get("exam_token")
-        round_id = request.query_params.get("round_id")
-
-        if not exam_token or not round_id:
-            return self.build_response(
-                "error", 
-                "Missing exam_token or round_id query parameters.", 
-                {}, 
-                status.HTTP_400_BAD_REQUEST
-            )
-
+    @staticmethod
+    def generate_agent_settings(exam_token, round_id):
+        """
+        Validates exam token and round ID, and generates the complete Deepgram Voice Agent
+        settings payload including dynamic prompt construction.
+        """
         try:
             link = CandidateInterviewLink.objects.select_related(
                 "session", "session__candidate"
             ).get(token=exam_token)
         except CandidateInterviewLink.DoesNotExist:
-            return self.build_response(
-                "error", 
-                "Invalid exam link.", 
-                {}, 
-                status.HTTP_404_NOT_FOUND
-            )
+            raise ValueError("Invalid exam token.")
 
         if not link.is_valid:
-            # We can allow STARTED status links to access this endpoint while they are doing the exam.
             if link.status not in ["ACTIVE", "STARTED"]:
-                return self.build_response(
-                    "error", 
-                    "This exam link has expired or already been completed.", 
-                    {}, 
-                    status.HTTP_403_FORBIDDEN
-                )
+                raise ValueError("This exam link has expired or already been completed.")
 
         session = link.session
 
         try:
             round_obj = session.rounds.get(id=round_id)
         except InterviewRound.DoesNotExist:
-            return self.build_response(
-                "error", 
-                "Interview round not found for this session.", 
-                {}, 
-                status.HTTP_404_NOT_FOUND
-            )
+            raise ValueError("Interview round not found for this session.")
 
         # ─── Construct the System Prompt ───
         job_title = session.job_title or "the position"
@@ -117,7 +92,7 @@ ROUND-SPECIFIC FOCUS for "{round_designation}":
 
         prompt += "\nBegin the interview now. Introduce yourself and ask the first question."
 
-        # ─── Construct Deepgram Settings JSON payload ───
+        # ─── Construct Settings JSON payload ───
         settings_payload = {
             "type": "Settings",
             "audio": {
@@ -155,7 +130,7 @@ ROUND-SPECIFIC FOCUS for "{round_designation}":
             }
         }
 
-        # Securely configure the custom OpenAI-compatible Google endpoint if key is available
+        # Securely configure the custom OpenAI-compatible Google endpoint
         gemini_key = getattr(dj_settings, "GEMINI_API_KEY", None)
         if gemini_key:
             settings_payload["agent"]["think"]["endpoint"] = {
@@ -166,27 +141,16 @@ ROUND-SPECIFIC FOCUS for "{round_designation}":
                 }
             }
         else:
-            # Fallback if no key is configured on the backend
             settings_payload["agent"]["think"]["provider"]["type"] = "google"
             settings_payload["agent"]["think"]["provider"]["model"] = "gemini-2.5-flash"
 
-        return self.build_response(
-            "success", 
-            "Deepgram settings generated successfully.", 
-            {"settings": settings_payload}
-        )
-
-
-class AIInterviewSubmitView(APIView, ResponseMixin):
-    """
-    Submits a VIDEO/voice round answer transcript, dynamically splits it using AI,
-    and updates/creates individual InterviewQuestion records.
-    """
-    permission_classes = (AllowAny,)
-    authentication_classes = []
+        return settings_payload
 
     @staticmethod
     def split_voice_transcript(transcript):
+        """
+        Parses a dynamic voice dialogue transcript into structured question-answer pairs using Gemini.
+        """
         prompt = (
             "You are an expert data parser. Your task is to analyze the following voice interview transcript between an AI Interviewer (Sophia) and a Candidate, and split it into a list of individual questions asked by the interviewer and the corresponding answers provided by the candidate.\n\n"
             f"TRANSCRIPT:\n{transcript}\n\n"
@@ -210,89 +174,131 @@ class AIInterviewSubmitView(APIView, ResponseMixin):
                 cleaned_text = response_text.split("```")[1].split("```")[0].strip()
             return json.loads(cleaned_text.strip())
         except Exception as e:
-            import logging
-            logger = logging.getLogger("ai_interview.submit")
-            logger.error(f"Failed to split voice transcript in AIInterview app: {e}")
+            logger.error(f"Failed to split voice transcript in AIInterviewService: {e}")
             return [{"question": "Voice Interview Session", "answer": transcript}]
 
-    def post(self, request, question_id):
-        exam_token = request.data.get('exam_token')
-        answer = request.data.get('answer', '')
-
-        if not exam_token:
-            return self.build_response("error", "exam_token is required.", {}, status.HTTP_400_BAD_REQUEST)
-
-        try:
-            link = CandidateInterviewLink.objects.select_related("session").get(token=exam_token)
-        except CandidateInterviewLink.DoesNotExist:
-            return self.build_response("error", "Invalid exam token.", {}, status.HTTP_401_UNAUTHORIZED)
-
-        if not link.is_valid:
-            return self.build_response("error", "Exam has expired or been completed.", {}, status.HTTP_403_FORBIDDEN)
-
-        # Mark link/session as started if active
-        if link.status == 'ACTIVE':
-            link.status = 'STARTED'
-            link.started_at = timezone.now()
-            link.ip_address = request.META.get('REMOTE_ADDR')
-            link.user_agent = request.META.get('HTTP_USER_AGENT', '')
-            link.save()
-            link.session.status = 'ACTIVE'
-            link.session.save(update_fields=['status'])
-
-        # Find the question
+    @staticmethod
+    def save_split_transcript(question_id, pairs):
+        """
+        Saves the split segments into separate InterviewQuestion database records.
+        """
         try:
             question = InterviewQuestion.objects.select_related('round').get(id=question_id)
         except InterviewQuestion.DoesNotExist:
-            return self.build_response("error", "Question not found.", {}, status.HTTP_404_NOT_FOUND)
+            logger.error(f"Question {question_id} not found during split save.")
+            return
 
-        if str(question.round.session.id) != str(link.session.id):
-            return self.build_response("error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN)
-
-        # Save and split transcript
-        if "Interviewer:" in answer:
-            try:
-                pairs = self.split_voice_transcript(answer)
-                if isinstance(pairs, list) and len(pairs) > 0:
-                    # 1. Update the first (existing) question
-                    first_pair = pairs[0]
-                    question.question_text = first_pair.get("question", question.question_text)
-                    question.candidate_answer = first_pair.get("answer", "")
-                    question.answered_at = timezone.now()
-                    question.save(update_fields=['question_text', 'candidate_answer', 'answered_at'])
-
-                    # 2. Clear any other empty questions in this round
-                    question.round.questions.exclude(id=question.id).delete()
-
-                    # 3. Create records for the remaining pairs
-                    for pair in pairs[1:]:
-                        InterviewQuestion.objects.create(
-                            round=question.round,
-                            question_text=pair.get("question", "Follow-up Question"),
-                            candidate_answer=pair.get("answer", ""),
-                            question_type="VIDEO",
-                            asked_at=timezone.now(),
-                            answered_at=timezone.now()
-                        )
-                else:
-                    question.candidate_answer = answer
-                    question.answered_at = timezone.now()
-                    question.save(update_fields=['candidate_answer', 'answered_at'])
-            except Exception as ex:
-                import logging
-                logger = logging.getLogger("ai_interview.submit")
-                logger.error(f"Error processing video submission: {ex}")
-                question.candidate_answer = answer
-                question.answered_at = timezone.now()
-                question.save(update_fields=['candidate_answer', 'answered_at'])
-        else:
-            # Fallback/Default save
-            question.candidate_answer = answer
+        if isinstance(pairs, list) and len(pairs) > 0:
+            # 1. Update the first (existing) question
+            first_pair = pairs[0]
+            question.question_text = first_pair.get("question", question.question_text)
+            question.candidate_answer = first_pair.get("answer", "")
             question.answered_at = timezone.now()
-            question.save(update_fields=['candidate_answer', 'answered_at'])
+            question.save(update_fields=['question_text', 'candidate_answer', 'answered_at'])
 
-        return self.build_response("success", "Video round answer split and saved successfully.", {
-            "question_id": str(question.id),
-            "answered_at": question.answered_at.isoformat() if question.answered_at else timezone.now().isoformat(),
-            "next_question": None
-        })
+            # 2. Clear other questions in this round
+            question.round.questions.exclude(id=question.id).delete()
+
+            # 3. Create records for the remaining pairs
+            for pair in pairs[1:]:
+                InterviewQuestion.objects.create(
+                    round=question.round,
+                    question_text=pair.get("question", "Follow-up Question"),
+                    candidate_answer=pair.get("answer", ""),
+                    question_type="VIDEO",
+                    asked_at=timezone.now(),
+                    answered_at=timezone.now()
+                )
+        else:
+            logger.warning(f"No valid pairs received to split for question {question_id}.")
+
+    @staticmethod
+    def evaluate_question_logic(question_id):
+        """
+        Evaluates a single question.
+        - Programmatic evaluation for MCQ/MULTI_SELECT (no LLM, 100% accurate, no explanation needed).
+        - AI-based evaluation for TEXT, CODE, or VIDEO (uses Gemini).
+        """
+        try:
+            question = InterviewQuestion.objects.select_related('round__session').get(id=question_id)
+        except InterviewQuestion.DoesNotExist:
+            raise ValueError("Question not found.")
+
+        if not question.candidate_answer:
+            raise ValueError("No candidate answer to evaluate.")
+
+        # ─── 1. Programmatic Evaluation for MCQ/MULTI_SELECT ───
+        if question.question_type in ['MCQ', 'MULTI_SELECT']:
+            correct_options = []
+            if isinstance(question.mcq_options, list):
+                for opt in question.mcq_options:
+                    if opt.get("is_correct") is True:
+                        correct_options.append(opt.get("label", "").strip().upper())
+            
+            cand_ans_clean = question.candidate_answer.strip().upper()
+            
+            # Simple direct matching: e.g. "A" matches ["A"]
+            is_correct = False
+            for correct_label in correct_options:
+                if correct_label in cand_ans_clean or cand_ans_clean in correct_label:
+                    is_correct = True
+                    break
+            
+            if is_correct:
+                score = question.marks
+                feedback = f"Correct option selected. Option labels matched: {', '.join(correct_options)}."
+            else:
+                score = 0
+                feedback = f"Incorrect option selected. Correct options were: {', '.join(correct_options)}."
+            
+            evaluation_result = {
+                "score": score,
+                "feedback": feedback,
+                "breakdown": {
+                    "accuracy": 10 if is_correct else 0,
+                    "depth": 10 if is_correct else 0,
+                    "relevance": 10 if is_correct else 0
+                }
+            }
+            question.evaluation = evaluation_result
+            question.save(update_fields=['evaluation'])
+            return evaluation_result
+
+        # ─── 2. AI-based Evaluation for TEXT, CODE, or VIDEO ───
+        session = question.round.session
+        round_obj = question.round
+        previous_questions = InterviewQuestion.objects.filter(round=round_obj).order_by('asked_at')
+        from AIrounds.services.prompt_service import InterviewPromptService
+        context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
+        
+        evaluation_rules = (
+            "CRITICAL EVALUATION RULE FOR TYPING/SPOKEN ANSWERS:\n"
+            "- Evaluate the candidate's answer based on technical correctness, explanation depth, clarity, and relevance.\n"
+            "- Be rigorous and fair."
+        )
+
+        prompt = (
+            f"Evaluate the candidate's answer against the provided ideal answer/criteria.\n\n"
+            f"QUESTION: {question.question_text}\n"
+            f"IDEAL ANSWER: {question.ideal_answer or 'Not provided. Evaluate based on industry best practices for this role and question context.'}\n"
+            f"CANDIDATE ANSWER: {question.candidate_answer}\n\n"
+            f"{evaluation_rules}\n\n"
+            f"CONTEXT:\n{context}"
+        )
+
+        from AIrounds.services.evaluation import AnswerEvaluation
+        response_text = AIBaseService.generate_content(
+            prompt=prompt,
+            system_instruction="You are an expert interviewer evaluating a candidate's response. Be fair but rigorous.",
+            temperature=0.3,
+            response_schema=AnswerEvaluation
+        )
+
+        try:
+            data = json.loads(response_text)
+            question.evaluation = data
+            question.save(update_fields=['evaluation'])
+            return data
+        except Exception as e:
+            logger.error(f"Failed to parse AI evaluation response: {e}")
+            raise ValueError("AI failed to evaluate the answer.")

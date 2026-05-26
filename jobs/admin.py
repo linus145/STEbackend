@@ -9,7 +9,8 @@ class SkillAdmin(admin.ModelAdmin):
 
 @admin.register(JobPost)
 class JobPostAdmin(admin.ModelAdmin):
-    list_display = ("title", "company", "job_type", "work_mode", "status", "experience_level", "created_at")
+    list_editable = ('is_deleted',)
+    list_display = ("title", "company", "job_type", "work_mode", "status", "experience_level", "created_at", 'is_deleted')
     list_filter = ("status", "job_type", "work_mode", "experience_level", "is_deleted")
     search_fields = ("title", "company__company_name", "description")
     readonly_fields = ("id", "created_at", "updated_at")
@@ -18,7 +19,8 @@ class JobPostAdmin(admin.ModelAdmin):
 
 @admin.register(JobApplication)
 class JobApplicationAdmin(admin.ModelAdmin):
-    list_display = ("applicant", "job", "status", "applied_at")
+    list_editable = ('is_deleted',)
+    list_display = ("applicant", "job", "status", "applied_at", 'is_deleted')
     list_filter = ("status", "is_deleted")
     search_fields = ("applicant__email", "job__title")
     readonly_fields = ("id", "applied_at", "updated_at")
@@ -32,6 +34,7 @@ class AppliedJobAdmin(admin.ModelAdmin):
 
 @admin.register(TalentPipeline)
 class TalentPipelineAdmin(admin.ModelAdmin):
+    list_editable = ('is_deleted',)
     list_display = ("talent", "company", "status", "added_at", "is_deleted")
     list_filter = ("status", "is_deleted", "added_at")
     search_fields = ("talent__email", "talent__first_name", "talent__last_name", "company__company_name")

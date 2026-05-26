@@ -124,3 +124,52 @@ class Startup(SoftDeleteModel):
 
     def __str__(self):
         return f"{self.name} (by {self.founder.email})"
+
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=CompanyProfile)
+def sync_company_profile_to_organization(sender, instance, created, **kwargs):
+    from organization.models import Organization
+    from startups.models import Startup
+    
+    user = instance.owner
+    startup = None
+    if user:
+        startup = Startup.objects.filter(founder=user, name=instance.company_name).first()
+        if not startup:
+            startup = user.startups.first()
+        if not startup:
+            startup = Startup.objects.filter(founder=user).first()
+        if not startup:
+            startup = Startup.objects.first()
+        if not startup:
+            startup = Startup.objects.create(
+                founder=user,
+                name=instance.company_name,
+                pitch=instance.description or f"Startup profile for {instance.company_name}",
+                industry=instance.industry or "Technology",
+                stage="Bootstrap",
+                website_url=instance.website,
+                logo_url=instance.logo_url
+            )
+            
+    defaults = {
+        "name": instance.company_name,
+        "website": instance.website,
+        "address": instance.location,
+        "logo_url": instance.logo_url,
+        "banner_url": instance.banner_url,
+        "industry": instance.industry,
+        "company_size": instance.company_size,
+        "description": instance.description,
+        "founded_year": instance.founded_year,
+    }
+    if startup:
+        defaults["startup"] = startup
+        
+    Organization.objects.update_or_create(
+        company=instance,
+        defaults=defaults
+    )

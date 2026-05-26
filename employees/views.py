@@ -117,16 +117,80 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             serializer.data, status=status.HTTP_201_CREATED, headers=headers
         )
 
+    @action(detail=False, methods=["get"], url_path="me", permission_classes=[permissions.IsAuthenticated])
+    def me(self, request):
+        """Return the employee profile linked to the currently authenticated user."""
+        user = request.user
+        try:
+            employee = Employee.objects.select_related(
+                "department", "designation", "user", "profile_details"
+            ).get(user=user)
+        except Employee.DoesNotExist:
+            return Response(
+                {"error": "No employee profile found for this user."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = EmployeeDetailSerializer(employee, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="send-credentials")
     def send_credentials(self, request, pk=None):
         employee = self.get_object()
         from employees.services import EmployeeService
 
+        password = request.data.get("password")
+
+        # If a password is provided, set it on the user account
+        # If not provided, use the existing portal_password if set, or auto-generate a secure temporary password
+        if not password:
+            if employee.portal_password:
+                password = employee.portal_password
+            else:
+                import random, string
+                password = 'B2lq_' + ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
+
+        # Ensure the employee has a linked user account
+        if not employee.user:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            user = User.objects.filter(email=employee.email).first()
+            if not user:
+                user = User.objects.create_user(
+                    email=employee.email,
+                    password=password,
+                    first_name=employee.first_name,
+                    last_name=employee.last_name,
+                    role='OPERATIONS'
+                )
+            else:
+                user.set_password(password)
+                user.save()
+            employee.user = user
+            employee.save()
+        else:
+            employee.user.set_password(password)
+            employee.user.save()
+
+        # Store plaintext password for HR admin visibility
+        employee.portal_password = password
+        employee.save()
+
+        # Update portal_username if provided
+        portal_username = request.data.get("portal_username")
+        if portal_username:
+            new_username = portal_username.strip().lower()
+            if new_username and new_username != employee.portal_username:
+                from employees.models import Employee as EmpModel
+                if not EmpModel.all_objects.filter(portal_username=new_username).exclude(id=employee.id).exists():
+                    employee.portal_username = new_username
+                    employee.save()
+
         result = EmployeeService.send_credentials_email(
-            employee, request.META.get("HTTP_HOST"), request.build_absolute_uri
+            employee, request.META.get("HTTP_HOST"), request.build_absolute_uri,
+            temp_password=password
         )
         return Response(
-            {"message": "Credentials email processed successfully.", **result},
+            {"message": "Credentials email sent successfully.", **result},
             status=status.HTTP_200_OK,
         )
 

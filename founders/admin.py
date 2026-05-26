@@ -3,8 +3,9 @@ from .models import Founder
 
 @admin.register(Founder)
 class FounderAdmin(admin.ModelAdmin):
-    list_display = ('get_email', 'get_full_name', 'primary_industry', 'experience_years', 'location')
-    list_filter = ('primary_industry', 'location')
+    list_editable = ('is_deleted',)
+    list_display = ('get_email', 'get_full_name', 'primary_industry', 'experience_years', 'location', 'is_deleted')
+    list_filter = ('primary_industry', 'location', 'is_deleted')
     search_fields = ('user__email', 'user__first_name', 'user__last_name', 'headline')
     readonly_fields = ('created_at', 'updated_at')
     

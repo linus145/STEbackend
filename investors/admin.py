@@ -3,8 +3,9 @@ from .models import Investor
 
 @admin.register(Investor)
 class InvestorAdmin(admin.ModelAdmin):
-    list_display = ('get_email', 'firm_name', 'location', 'get_full_name')
-    list_filter = ('firm_name', 'location')
+    list_editable = ('is_deleted',)
+    list_display = ('get_email', 'firm_name', 'location', 'get_full_name', 'is_deleted')
+    list_filter = ('firm_name', 'location', 'is_deleted')
     search_fields = ('user__email', 'user__first_name', 'user__last_name', 'firm_name', 'headline')
     readonly_fields = ('created_at', 'updated_at')
     

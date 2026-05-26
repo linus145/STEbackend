@@ -35,9 +35,10 @@ class EmployeeDocumentInline(admin.TabularInline):
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
-    list_display = ('employee_id', 'first_name', 'last_name', 'startup', 'department', 'designation', 'status')
+    list_editable = ('is_deleted',)
+    list_display = ('employee_id', 'first_name', 'last_name', 'startup', 'department', 'designation', 'status', 'is_deleted')
     search_fields = ('employee_id', 'first_name', 'last_name', 'email')
-    list_filter = ('startup', 'status', 'employment_type', 'department')
+    list_filter = ('startup', 'status', 'employment_type', 'department', 'is_deleted')
     inlines = [
         EmployeeProfileInline, 
         EmergencyContactInline, 

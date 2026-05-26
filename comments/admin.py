@@ -3,8 +3,9 @@ from .models import Comment
 
 @admin.register(Comment)
 class CommentAdmin(admin.ModelAdmin):
-    list_display = ('user', 'post', 'short_content', 'created_at')
-    list_filter = ('created_at', 'user')
+    list_editable = ('is_deleted',)
+    list_display = ('user', 'post', 'short_content', 'created_at', 'is_deleted')
+    list_filter = ('created_at', 'user', 'is_deleted')
     search_fields = ('content', 'user__email', 'post__id')
     readonly_fields = ('id', 'created_at', 'updated_at')
     ordering = ('-created_at',)
