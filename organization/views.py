@@ -9,6 +9,7 @@ from organization.serializers import (
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from subscription.utils import HasHRToolkitPermission
 
 
 class StartupTenantMixin:
@@ -20,10 +21,15 @@ class StartupTenantMixin:
 
     def get_queryset(self):
         from organization.models import Organization
+        from subscription.utils import check_subscription_feature
+        from rest_framework.exceptions import PermissionDenied
 
         user = self.request.user
         if not user or user.is_anonymous:
             return getattr(self, "queryset", self.model.objects.none() if hasattr(self, "model") else None)
+
+        if not user.is_superuser and not check_subscription_feature(user, "has_hr_toolkit"):
+            raise PermissionDenied("This feature requires an active HRMS/Enterprise subscription plan.")
 
         # Determine the base queryset
         qs = getattr(self, "queryset", None)
@@ -160,6 +166,7 @@ class StartupTenantMixin:
 
 
 class DepartmentViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (permissions.IsAuthenticated, HasHRToolkitPermission)
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -224,6 +231,7 @@ class DepartmentViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
 
 class DesignationViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (permissions.IsAuthenticated, HasHRToolkitPermission)
     queryset = Designation.objects.all()
     serializer_class = DesignationSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -299,8 +307,10 @@ class DesignationViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         return qs.annotate(employee_count=Count("employees", filter=Q(employees__is_deleted=False)))
 
 
+from subscription.utils import HasHRToolkitPermission
+
 class OrganizationDetailView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasHRToolkitPermission]
 
     def get(self, request):
         user = request.user

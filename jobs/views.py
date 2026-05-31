@@ -198,8 +198,12 @@ class JobApplicationsView(ListAPIView, ResponseMixin):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
+        if not hasattr(self.request.user, "company_profile"):
+            return JobApplication.objects.none()
         qs = JobApplication.objects.filter(
-            job_id=self.kwargs["job_id"], job__status="ACTIVE", is_deleted=False
+            job_id=self.kwargs["job_id"],
+            job__company=self.request.user.company_profile,
+            is_deleted=False
         ).select_related("applicant")
         status_filter = self.request.query_params.get("status")
         if status_filter:
@@ -208,7 +212,7 @@ class JobApplicationsView(ListAPIView, ResponseMixin):
 
 
 class UpdateApplicationStatusView(APIView, ResponseMixin):
-    permission_classes = (IsAuthenticated, IsCompanyOwner)
+    permission_classes = (IsAuthenticated, IsJobOwner)
 
     def patch(self, request, application_id):
         application = get_object_or_404(JobApplication, id=application_id)

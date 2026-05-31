@@ -18,6 +18,14 @@ def task_generate_question_pool(application_id, round_type, designation, difficu
         return questions
     except Exception as e:
         logger.error(f"Error in task_generate_question_pool: {e}")
+        try:
+            from AIrounds.models import InterviewSession
+            session = InterviewSession.objects.filter(application_id=application_id).order_by('-created_at').first()
+            if session:
+                session.status = 'FAILED'
+                session.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition session to FAILED in task_generate_question_pool: {ex}")
         raise e
 
 @shared_task
@@ -68,6 +76,14 @@ def task_regenerate_round_questions(round_id, count):
         return f"{len(questions)} questions regenerated for round {round_id}"
     except Exception as e:
         logger.error(f"Error in task_regenerate_round_questions: {e}")
+        try:
+            from AIrounds.models import InterviewRound
+            rnd = InterviewRound.objects.select_related('session').get(id=round_id)
+            if rnd.session:
+                rnd.session.status = 'FAILED'
+                rnd.session.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition session to FAILED in task_regenerate_round_questions: {ex}")
         raise e
 
 @shared_task
@@ -82,6 +98,13 @@ def task_evaluate_answer(session_id, round_id, question_id, answer_text):
         return eval_data
     except Exception as e:
         logger.error(f"Error in task_evaluate_answer: {e}")
+        try:
+            from AIrounds.models import InterviewSession
+            session = InterviewSession.objects.get(id=session_id)
+            session.status = 'FAILED'
+            session.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition session to FAILED in task_evaluate_answer: {ex}")
         raise e
 
 @shared_task
@@ -97,4 +120,11 @@ def task_send_interview_invite(session_id):
         return f"Invite email task completed. Success: {success}"
     except Exception as e:
         logger.error(f"Error in task_send_interview_invite for session {session_id}: {e}")
+        try:
+            from AIrounds.models import InterviewSession
+            session = InterviewSession.objects.get(id=session_id)
+            session.status = 'FAILED'
+            session.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition session to FAILED in task_send_interview_invite: {ex}")
         raise e

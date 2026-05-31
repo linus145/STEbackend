@@ -60,20 +60,48 @@ import datetime
 class SalaryStructureSerializer(serializers.ModelSerializer):
     employee_allowances = EmployeeAllowanceSerializer(source='employeeallowance_set', many=True, read_only=True)
     employee_deductions = EmployeeDeductionSerializer(source='employeededuction_set', many=True, read_only=True)
-    employee_name = serializers.CharField(source='employee.first_name', read_only=True)
-    employee_last_name = serializers.CharField(source='employee.last_name', read_only=True)
-    employee_code = serializers.CharField(source='employee.employee_id', read_only=True)
-    employee_designation = serializers.CharField(source='employee.designation.title', read_only=True, default='Team Member')
+    
+    employee_name = serializers.SerializerMethodField()
+    employee_last_name = serializers.SerializerMethodField()
+    employee_code = serializers.SerializerMethodField()
+    employee_designation = serializers.SerializerMethodField()
+    is_employee_deleted = serializers.SerializerMethodField()
     effective_from = serializers.DateField(default=timezone.now().date)
     
     class Meta:
         model = SalaryStructure
         fields = [
-            'id', 'employee', 'employee_code', 'employee_name', 'employee_last_name', 'employee_designation', 'basic_salary', 'hra', 
+            'id', 'employee', 'employee_code', 'employee_name', 'employee_last_name', 'employee_designation', 'is_employee_deleted', 'basic_salary', 'hra', 
             'overtime_rate', 'tax_percentage', 'pf_percentage', 'esi_percentage', 
             'effective_from', 'status', 'employee_allowances', 'employee_deductions', 
             'created_at', 'updated_at'
         ]
+
+    def _get_employee(self, obj):
+        from employees.models import Employee
+        return Employee.all_objects.filter(id=obj.employee_id).first()
+
+    def get_employee_name(self, obj):
+        emp = self._get_employee(obj)
+        return emp.first_name if emp else None
+
+    def get_employee_last_name(self, obj):
+        emp = self._get_employee(obj)
+        return emp.last_name if emp else None
+
+    def get_employee_code(self, obj):
+        emp = self._get_employee(obj)
+        return emp.employee_id if emp else None
+
+    def get_employee_designation(self, obj):
+        emp = self._get_employee(obj)
+        if emp and emp.designation:
+            return emp.designation.title
+        return 'Team Member'
+
+    def get_is_employee_deleted(self, obj):
+        emp = self._get_employee(obj)
+        return emp.is_deleted if emp else True
 
     def to_internal_value(self, data):
         resolved_data = resolve_employee_id_in_data(data)

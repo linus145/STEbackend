@@ -17,6 +17,14 @@ def task_split_and_save_voice_transcript(question_id, answer):
         return f"Successfully split transcript for question {question_id}."
     except Exception as e:
         logger.error(f"Error in task_split_and_save_voice_transcript: {e}")
+        try:
+            from AIrounds.models import InterviewQuestion
+            q = InterviewQuestion.objects.select_related('round__session').get(id=question_id)
+            if q.round and q.round.session:
+                q.round.session.status = 'FAILED'
+                q.round.session.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition session to FAILED in task_split_and_save_voice_transcript: {ex}")
         raise e
 
 @shared_task
@@ -31,4 +39,12 @@ def task_evaluate_voice_question(question_id):
         return eval_data
     except Exception as e:
         logger.error(f"Error in task_evaluate_voice_question: {e}")
+        try:
+            from AIrounds.models import InterviewQuestion
+            q = InterviewQuestion.objects.select_related('round__session').get(id=question_id)
+            if q.round and q.round.session:
+                q.round.session.status = 'FAILED'
+                q.round.session.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition session to FAILED in task_evaluate_voice_question: {ex}")
         raise e

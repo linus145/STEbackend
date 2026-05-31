@@ -12,6 +12,7 @@ class InterviewSession(models.Model):
         ("EVALUATING", "Evaluating"),
         ("COMPLETED", "Completed"),
         ("CANCELLED", "Cancelled"),
+        ("FAILED", "Failed"),
     ]
 
     STRATEGY_TIER_CHOICES = [

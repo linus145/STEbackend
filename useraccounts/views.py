@@ -499,22 +499,32 @@ class GoogleLoginView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
 
     def post(self, request, *args, **kwargs):
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # 1. Validate Google's CSRF double-submit cookie protection
+        csrf_token_cookie = request.COOKIES.get("g_csrf_token")
+        csrf_token_body = request.data.get("g_csrf_token") or request.POST.get("g_csrf_token")
+        if not csrf_token_cookie or not csrf_token_body or csrf_token_cookie != csrf_token_body:
+            logger.warning("CSRF validation failed for Google OAuth request.")
+            return redirect(f"{settings.FRONTEND_URL}/login?error=csrf_error")
+
         # In redirect mode, Google sends data as form-data
         token = request.data.get("credential") or request.POST.get("credential")
 
         if not token:
-            print("DEBUG: No credential found in request")
+            logger.warning("No Google OAuth credential found in request.")
             return redirect(f"{settings.FRONTEND_URL}/login?error=no_token")
 
         try:
-            print(f"DEBUG: Verifying Google Token...")
+            logger.info("Verifying Google OAuth Token...")
             idinfo = id_token.verify_oauth2_token(
                 token, requests.Request(), settings.GOOGLE_OAUTH_CLIENT_ID
             )
 
             google_id = idinfo["sub"]
             email = idinfo["email"]
-            print(f"DEBUG: Google User Verified: {email}")
+            logger.info("Google OAuth User verified successfully.")
 
             first_name = idinfo.get("given_name", "")
             last_name = idinfo.get("family_name", "")
@@ -531,10 +541,10 @@ class GoogleLoginView(APIView, RequestResponseMixin):
             return response
 
         except ValueError as e:
-            print(f"DEBUG: Token verification failed: {str(e)}")
+            logger.error(f"Google Token verification failed: {str(e)}")
             return redirect(f"{settings.FRONTEND_URL}/login?error=invalid_token")
         except Exception as e:
-            print(f"DEBUG: Google Login Exception: {str(e)}")
+            logger.exception(f"Google Login Error: {str(e)}")
             return redirect(f"{settings.FRONTEND_URL}/login?error=server_error")
 
 
@@ -542,11 +552,30 @@ class UserListView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, *args, **kwargs):
-        # Exclude Admin and Staff users to show all potential candidates
+        # 1. Authorization check: Only recruiters or staff can view the candidate list
+        is_authorized = (
+            request.user.is_staff or 
+            request.user.role in [
+                CustomUser.ROLE_ADMIN,
+                CustomUser.ROLE_FOUNDER,
+                CustomUser.ROLE_CO_FOUNDER,
+                CustomUser.ROLE_INVESTOR,
+            ] or 
+            hasattr(request.user, 'employee_profile')
+        )
+        if not is_authorized:
+            return self.build_response("error", "Only recruiters or founders are authorized to view candidates.", {}, status.HTTP_403_FORBIDDEN)
+
+        # 2. Optimized Query with select_related & prefetch_related to solve N+1 database queries
         users = CustomUser.objects.exclude(
             models.Q(role=CustomUser.ROLE_ADMIN) | models.Q(is_staff=True)
+        ).select_related(
+            'founder_profile', 'investor_profile', 'company_profile'
+        ).prefetch_related(
+            'employee_profile', 'employee_profile__startup', 'employee_profile__organization'
         )
-        serializer = UserSerializer(users, many=True)
+        
+        serializer = UserSerializer(users, many=True, context={'request': request})
         return self.build_response(
             "success",
             "Users fetched successfully.",
@@ -559,6 +588,20 @@ class RecruiterContactView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
+        # 1. Authorization check: Only recruiters or staff can contact candidates
+        is_authorized = (
+            request.user.is_staff or 
+            request.user.role in [
+                CustomUser.ROLE_ADMIN,
+                CustomUser.ROLE_FOUNDER,
+                CustomUser.ROLE_CO_FOUNDER,
+                CustomUser.ROLE_INVESTOR,
+            ] or 
+            hasattr(request.user, 'employee_profile')
+        )
+        if not is_authorized:
+            return self.build_response("error", "Only recruiters or founders are authorized to contact candidates.", {}, status.HTTP_403_FORBIDDEN)
+
         target_user_id = request.data.get("target_user_id")
         message_content = request.data.get("message")
         send_email = request.data.get("send_email", False)
@@ -578,7 +621,7 @@ class RecruiterContactView(APIView, RequestResponseMixin):
                 "error", "User not found.", {}, status.HTTP_404_NOT_FOUND
             )
 
-        # 1. Send Chat Message
+        # 2. Send Chat Message
         # Check if a direct-type 1-to-1 room already exists between these two users
         room = (
             ChatRoom.objects.filter(
@@ -599,7 +642,7 @@ class RecruiterContactView(APIView, RequestResponseMixin):
         ChatMessage.objects.create(room=room, sender=request.user, text=message_content)
         room.save()  # bump updated_at
 
-        # 2. Send Email
+        # 3. Send Email
         if send_email:
             try:
                 # Fetch recruiter's company profile/name dynamically
@@ -659,7 +702,9 @@ class RecruiterContactView(APIView, RequestResponseMixin):
                 )
             except Exception as e:
                 # We still return success for the chat message even if email fails
-                print(f"Email sending failed: {e}")
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Email sending failed: {e}")
 
         return self.build_response(
             "success", "Message sent successfully.", {}, status.HTTP_200_OK
@@ -670,6 +715,20 @@ class RecruiterBulkContactView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
     def post(self, request, *args, **kwargs):
+        # 1. Authorization check: Only recruiters or staff can bulk contact candidates
+        is_authorized = (
+            request.user.is_staff or 
+            request.user.role in [
+                CustomUser.ROLE_ADMIN,
+                CustomUser.ROLE_FOUNDER,
+                CustomUser.ROLE_CO_FOUNDER,
+                CustomUser.ROLE_INVESTOR,
+            ] or 
+            hasattr(request.user, 'employee_profile')
+        )
+        if not is_authorized:
+            return self.build_response("error", "Only recruiters or founders are authorized to bulk contact candidates.", {}, status.HTTP_403_FORBIDDEN)
+
         target_user_ids = request.data.get("target_user_ids", [])
         message_content = request.data.get("message")
 
@@ -681,37 +740,68 @@ class RecruiterBulkContactView(APIView, RequestResponseMixin):
                 status.HTTP_400_BAD_REQUEST,
             )
 
+        from django.db import transaction
         success_count = 0
         failed_count = 0
 
-        for target_user_id in target_user_ids:
-            try:
-                target_user = CustomUser.objects.get(id=target_user_id)
-            except (CustomUser.DoesNotExist, ValueError):
-                failed_count += 1
-                continue
-
-            # 1. Send Chat Message
-            room = (
-                ChatRoom.objects.filter(
+        try:
+            with transaction.atomic():
+                # 2. Bulk fetch targets to solve N+1
+                targets = CustomUser.objects.filter(id__in=target_user_ids)
+                targets_by_id = {str(t.id): t for t in targets}
+                
+                # 3. Bulk fetch existing direct rooms of the user to solve M2M query inside loop
+                existing_rooms = ChatRoom.objects.filter(
                     is_group=False,
                     room_type=ChatRoom.ROOM_TYPE_DIRECT,
-                    participants=request.user,
-                )
-                .filter(participants=target_user)
-                .first()
+                    participants=request.user
+                ).prefetch_related('participants')
+                
+                room_by_participant = {}
+                for r in existing_rooms:
+                    for p in r.participants.all():
+                        if p != request.user:
+                            room_by_participant[str(p.id)] = r
+
+                chat_messages_to_create = []
+                rooms_to_save = []
+                
+                for target_id in target_user_ids:
+                    target_user = targets_by_id.get(str(target_id))
+                    if not target_user:
+                        failed_count += 1
+                        continue
+
+                    room = room_by_participant.get(str(target_user.id))
+                    if not room:
+                        room = ChatRoom.objects.create(
+                            is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT
+                        )
+                        room.participants.add(request.user, target_user)
+                        # Keep cache updated
+                        room_by_participant[str(target_user.id)] = room
+
+                    chat_messages_to_create.append(
+                        ChatMessage(room=room, sender=request.user, text=message_content)
+                    )
+                    rooms_to_save.append(room)
+                    success_count += 1
+
+                # Bulk create all messages at once
+                if chat_messages_to_create:
+                    ChatMessage.objects.bulk_create(chat_messages_to_create)
+
+                # Bump updated_at timestamps on active rooms
+                for r in set(rooms_to_save):
+                    r.save()
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("Bulk contact transaction failed")
+            return self.build_response(
+                "error", f"Transaction failed: {str(e)}", {}, status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-            if not room:
-                room = ChatRoom.objects.create(
-                    is_group=False, room_type=ChatRoom.ROOM_TYPE_DIRECT
-                )
-                room.participants.add(request.user, target_user)
-
-            ChatMessage.objects.create(room=room, sender=request.user, text=message_content)
-            room.save()  # bump updated_at
-            
-            success_count += 1
 
         return self.build_response(
             "success",
@@ -721,8 +811,17 @@ class RecruiterBulkContactView(APIView, RequestResponseMixin):
         )
 
 
+from rest_framework.throttling import AnonRateThrottle
+
+class OTPRequestThrottle(AnonRateThrottle):
+    rate = '5/hour'
+
+class OTPVerifyThrottle(AnonRateThrottle):
+    rate = '10/hour'
+
 class RequestOTPView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
+    throttle_classes = [OTPRequestThrottle]
 
     def post(self, request, *args, **kwargs):
         email = request.data.get("email")
@@ -740,6 +839,7 @@ class RequestOTPView(APIView, RequestResponseMixin):
 
 class VerifyOTPView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
+    throttle_classes = [OTPVerifyThrottle]
 
     def post(self, request, *args, **kwargs):
         email = request.data.get("email")
@@ -802,8 +902,9 @@ class Verify2FAOTPsView(APIView, RequestResponseMixin):
         if not secondary_otp or not third_otp:
             return self.build_response("error", "Both OTP codes are required for verification.", {}, status.HTTP_400_BAD_REQUEST)
 
-        # Verify secondary email OTP
-        if not user.secondary_email_otp or user.secondary_email_otp != secondary_otp:
+        # Verify secondary email OTP (timing-safe)
+        import hmac
+        if not user.secondary_email_otp or not hmac.compare_digest(str(user.secondary_email_otp), str(secondary_otp)):
             return self.build_response("error", "Invalid secondary email verification code.", {}, status.HTTP_400_BAD_REQUEST)
 
         if user.secondary_email_otp_created_at:
@@ -811,8 +912,8 @@ class Verify2FAOTPsView(APIView, RequestResponseMixin):
             if timezone.now() > expiration:
                 return self.build_response("error", "Secondary email verification code has expired.", {}, status.HTTP_400_BAD_REQUEST)
 
-        # Verify third email OTP
-        if not user.third_email_otp or user.third_email_otp != third_otp:
+        # Verify third email OTP (timing-safe)
+        if not user.third_email_otp or not hmac.compare_digest(str(user.third_email_otp), str(third_otp)):
             return self.build_response("error", "Invalid third email verification code.", {}, status.HTTP_400_BAD_REQUEST)
 
         if user.third_email_otp_created_at:

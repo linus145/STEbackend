@@ -1,4 +1,6 @@
 import uuid
+from decimal import Decimal
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
 from django.conf import settings
@@ -47,12 +49,12 @@ class SalaryStructure(SoftDeleteModel):
         on_delete=models.CASCADE,
         related_name='salary_structure'
     )
-    basic_salary = models.DecimalField(max_digits=15, decimal_places=2)
-    hra = models.DecimalField(max_digits=15, decimal_places=2, default=0.00, help_text="House Rent Allowance")
-    overtime_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Overtime rate per hour")
-    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, help_text="Default tax deduction percentage")
-    pf_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, help_text="Provident Fund percentage")
-    esi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, help_text="Employee State Insurance percentage")
+    basic_salary = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
+    hra = models.DecimalField(max_digits=15, decimal_places=2, default=0.00, validators=[MinValueValidator(Decimal('0.00'))], help_text="House Rent Allowance")
+    overtime_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, validators=[MinValueValidator(Decimal('0.00'))], help_text="Overtime rate per hour")
+    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, validators=[MinValueValidator(Decimal('0.00'))], help_text="Default tax deduction percentage")
+    pf_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, validators=[MinValueValidator(Decimal('0.00'))], help_text="Provident Fund percentage")
+    esi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, validators=[MinValueValidator(Decimal('0.00'))], help_text="Employee State Insurance percentage")
     effective_from = models.DateField(default=timezone.now)
     status = models.CharField(
         max_length=20, 
@@ -73,12 +75,12 @@ class SalaryStructure(SoftDeleteModel):
 class EmployeeAllowance(models.Model):
     structure = models.ForeignKey(SalaryStructure, on_delete=models.CASCADE)
     allowance = models.ForeignKey(Allowance, on_delete=models.CASCADE)
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
 
 class EmployeeDeduction(models.Model):
     structure = models.ForeignKey(SalaryStructure, on_delete=models.CASCADE)
     deduction = models.ForeignKey(Deduction, on_delete=models.CASCADE)
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
 
 class Payroll(SoftDeleteModel):
     """
@@ -89,7 +91,8 @@ class Payroll(SoftDeleteModel):
         ('PROCESSED', 'Processed'), 
         ('APPROVED', 'Approved'),
         ('PAID', 'Paid'),
-        ('REJECTED', 'Rejected')
+        ('REJECTED', 'Rejected'),
+        ('FAILED', 'Failed')
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -216,7 +219,7 @@ class Reimbursement(SoftDeleteModel):
         on_delete=models.CASCADE,
         related_name='reimbursements'
     )
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='OTHER')
     description = models.TextField(blank=True)
     proof = models.FileField(upload_to='reimbursement_proofs/', null=True, blank=True)
@@ -244,7 +247,7 @@ class PayrollAdjustment(SoftDeleteModel):
         related_name='adjustments'
     )
     type = models.CharField(max_length=20, choices=TYPE_CHOICES)
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
     reason = models.TextField()
     payroll_cycle = models.ForeignKey(
         Payroll,
@@ -264,9 +267,9 @@ class TaxConfiguration(SoftDeleteModel):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     slab_name = models.CharField(max_length=255)
-    percentage = models.DecimalField(max_digits=5, decimal_places=2, help_text="Tax percentage")
-    min_amount = models.DecimalField(max_digits=15, decimal_places=2, help_text="Minimum income threshold")
-    max_amount = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, help_text="Maximum income threshold")
+    percentage = models.DecimalField(max_digits=5, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))], help_text="Tax percentage")
+    min_amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))], help_text="Minimum income threshold")
+    max_amount = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal('0.00'))], help_text="Maximum income threshold")
     startup = models.ForeignKey(
         'startups.Startup',
         on_delete=models.CASCADE,

@@ -1,6 +1,7 @@
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from subscription.utils import HasAIInterviewPermission
 from AIrounds.models import InterviewRound, InterviewQuestion, InterviewSession
 from AIrounds.services.engine_service import InterviewEngineService
 from AIrounds.services.orchestrator import InterviewOrchestrator
@@ -13,7 +14,7 @@ class ConfigureInterviewView(APIView, ResponseMixin):
     Step 3/4: Recruiter configures the rounds and AI orchestrates the session.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request):
         application_id = request.data.get("job_application_id") or request.data.get(
@@ -30,6 +31,23 @@ class ConfigureInterviewView(APIView, ResponseMixin):
                 "application_id and rounds_config are required.",
                 {},
                 status.HTTP_400_BAD_REQUEST,
+            )
+
+        from startups.models import CompanyProfile
+        from jobs.models import JobApplication
+
+        try:
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            application = JobApplication.objects.get(id=application_id, job__company=company)
+        except JobApplication.DoesNotExist:
+            return self.build_response(
+                "error", "Job Application not found or unauthorized.", {}, status.HTTP_404_NOT_FOUND
             )
 
         try:
@@ -83,7 +101,7 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
     Recruiter requests AI to generate a pool of questions for configuration.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request):
         application_id = request.data.get("application_id")
@@ -100,6 +118,23 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
         if not application_id:
             return self.build_response(
                 "error", "application_id is required.", {}, status.HTTP_400_BAD_REQUEST
+            )
+
+        from startups.models import CompanyProfile
+        from jobs.models import JobApplication
+
+        try:
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            application = JobApplication.objects.get(id=application_id, job__company=company)
+        except JobApplication.DoesNotExist:
+            return self.build_response(
+                "error", "Job Application not found or unauthorized.", {}, status.HTTP_404_NOT_FOUND
             )
 
         try:
@@ -158,7 +193,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
     Returns a list of all interview sessions orchestrated by the recruiter's company.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def get(self, request):
         from startups.models import CompanyProfile
@@ -273,13 +308,14 @@ class GenerateInterviewLinkView(APIView, ResponseMixin):
     Recruiter generates an active exam link for a candidate's interview session.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request):
         from AIrounds.models import CandidateInterviewLink
         from datetime import timedelta
         from django.utils import timezone
         from django.conf import settings as django_settings
+        from startups.models import CompanyProfile
 
         session_id = request.data.get("session_id")
         expiry_hours = request.data.get("expiry_hours", 72)  # Default 3 days
@@ -294,6 +330,18 @@ class GenerateInterviewLinkView(APIView, ResponseMixin):
         except InterviewSession.DoesNotExist:
             return self.build_response(
                 "error", "Session not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        if session.application and session.application.job.company != company:
+            return self.build_response(
+                "error", "Unauthorized access to session.", {}, status.HTTP_403_FORBIDDEN
             )
 
         # Check if link already exists
@@ -351,9 +399,18 @@ class SessionDetailView(APIView, ResponseMixin):
     Used by the recruiter pipeline for the edit/detail panel.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def get(self, request, session_id):
+        from startups.models import CompanyProfile
+
+        try:
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
         try:
             session = (
                 InterviewSession.objects.select_related("candidate", "application__job")
@@ -363,6 +420,11 @@ class SessionDetailView(APIView, ResponseMixin):
         except InterviewSession.DoesNotExist:
             return self.build_response(
                 "error", "Session not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        if session.application and session.application.job.company != company:
+            return self.build_response(
+                "error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN
             )
 
         # Build rounds and questions
@@ -443,14 +505,29 @@ class DeleteQuestionView(APIView, ResponseMixin):
     Recruiter deletes a specific question from a round.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def delete(self, request, question_id):
+        from startups.models import CompanyProfile
+
         try:
-            question = InterviewQuestion.objects.get(id=question_id)
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            question = InterviewQuestion.objects.select_related("round__session__application__job").get(id=question_id)
         except InterviewQuestion.DoesNotExist:
             return self.build_response(
                 "error", "Question not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        session = question.round.session
+        if session.application and session.application.job.company != company:
+            return self.build_response(
+                "error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN
             )
 
         round_id = str(question.round.id)
@@ -472,16 +549,31 @@ class RegenerateRoundQuestionsView(APIView, ResponseMixin):
     Clears existing questions and generates new ones.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request, round_id):
+        from startups.models import CompanyProfile
+
         try:
-            rnd = InterviewRound.objects.select_related("session__application").get(
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            rnd = InterviewRound.objects.select_related("session__application__job").get(
                 id=round_id
             )
         except InterviewRound.DoesNotExist:
             return self.build_response(
                 "error", "Round not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        session = rnd.session
+        if session.application and session.application.job.company != company:
+            return self.build_response(
+                "error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN
             )
 
         count = request.data.get("count", rnd.max_questions or 5)
@@ -514,16 +606,30 @@ class EvaluateSessionView(APIView, ResponseMixin):
     For AI evaluation, use EvaluateQuestionView per question.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request, session_id):
+        from startups.models import CompanyProfile
+
         try:
-            session = InterviewSession.objects.prefetch_related(
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            session = InterviewSession.objects.select_related("application__job").prefetch_related(
                 "rounds__questions"
             ).get(id=session_id)
         except InterviewSession.DoesNotExist:
             return self.build_response(
                 "error", "Session not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        if session.application and session.application.job.company != company:
+            return self.build_response(
+                "error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN
             )
 
         results = []
@@ -577,16 +683,31 @@ class EvaluateQuestionView(APIView, ResponseMixin):
     Fast enough to avoid ASGI timeout (single Gemini call ~3-5s).
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request, question_id):
+        from startups.models import CompanyProfile
+
         try:
-            question = InterviewQuestion.objects.select_related("round__session").get(
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            question = InterviewQuestion.objects.select_related("round__session__application__job").get(
                 id=question_id
             )
         except InterviewQuestion.DoesNotExist:
             return self.build_response(
                 "error", "Question not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        session = question.round.session
+        if session.application and session.application.job.company != company:
+            return self.build_response(
+                "error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN
             )
 
         if not question.candidate_answer:
@@ -644,7 +765,7 @@ class DeleteInterviewSessionView(APIView, ResponseMixin):
     Deletes an interview session permanently.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def delete(self, request, session_id):
         from jobs.models import JobApplication
@@ -722,7 +843,7 @@ class ResendInviteView(APIView, ResponseMixin):
     Recruiter requests to resend the AI interview invitation email to the candidate.
     """
 
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request, session_id):
         try:

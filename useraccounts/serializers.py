@@ -45,6 +45,21 @@ class UserSerializer(serializers.ModelSerializer):
                 
         return data
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        request = self.context.get('request')
+        
+        # Only expose sensitive 2FA & backup emails to the owner themselves or staff
+        if request and request.user.is_authenticated:
+            if request.user == instance or request.user.is_staff:
+                return ret
+                
+        # Otherwise, strip them for privacy & security
+        ret.pop('secondary_email', None)
+        ret.pop('third_email', None)
+        ret.pop('is_2fa_enabled', None)
+        return ret
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
     

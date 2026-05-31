@@ -190,6 +190,9 @@ class PayrollGenerationService:
             defaults={'status': 'DRAFT'}
         )
 
+        # Lock the row for update to prevent concurrent modification/generation
+        payroll = Payroll.objects.select_for_update().get(id=payroll.id)
+
         if payroll.status not in ['DRAFT', 'REJECTED']:
             raise ValueError("Payroll is already processed or locked.")
 
@@ -248,9 +251,16 @@ class PayrollApprovalService:
     """
     @classmethod
     @transaction.atomic
-    def approve_payroll_cycle(cls, payroll, approver_user):
+    def approve_payroll_cycle(cls, payroll_id, approver_user_id):
+        # Load and lock the payroll object using select_for_update()
+        payroll = Payroll.objects.select_for_update().get(id=payroll_id)
+
         if payroll.status != 'PROCESSED':
             raise ValueError("Only processed payrolls can be approved.")
+
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        approver_user = User.objects.get(id=approver_user_id)
 
         payroll.status = 'APPROVED'
         payroll.approved_by = approver_user
@@ -278,7 +288,10 @@ class PayrollApprovalService:
 
     @classmethod
     @transaction.atomic
-    def reject_payroll_cycle(cls, payroll):
+    def reject_payroll_cycle(cls, payroll_id):
+        # Load and lock the payroll object using select_for_update()
+        payroll = Payroll.objects.select_for_update().get(id=payroll_id)
+
         if payroll.status != 'PROCESSED':
             raise ValueError("Only processed payrolls can be rejected.")
 

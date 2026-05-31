@@ -92,6 +92,121 @@ from drf_spectacular.views import (
 )
 
 
+from django.http import JsonResponse
+from django.utils import timezone
+from django.db import connections
+from django.core.cache import cache
+
+def liveness_check(request):
+    """Deep API health and diagnostics check verifying Database, Redis, Celery, Storage, and AI provider."""
+    from django.conf import settings
+    from maincore.imagekit_utils import ImageKitService
+    
+    status_details = {
+        "status": "healthy",
+        "database": "healthy",
+        "redis": "healthy",
+        "celery": "healthy",
+        "storage": "healthy",
+        "gemini": "healthy",
+        "timestamp": timezone.now().isoformat()
+    }
+    
+    # 1. Database Check
+    try:
+        db_conn = connections['default']
+        db_conn.cursor()
+    except Exception as e:
+        status_details["database"] = f"unhealthy: {str(e)}"
+        status_details["status"] = "unhealthy"
+
+    # 2. Redis Check
+    try:
+        cache.set("health_test_key", "ok", timeout=2)
+        if cache.get("health_test_key") != "ok":
+            status_details["redis"] = "unhealthy: cache validation failed"
+            status_details["status"] = "unhealthy"
+    except Exception as e:
+        status_details["redis"] = f"unhealthy: {str(e)}"
+        status_details["status"] = "unhealthy"
+
+    # 3. Celery Check
+    try:
+        from maincore.celery import app as celery_app
+        inspect = celery_app.control.inspect(timeout=1.0)
+        ping_res = inspect.ping() if inspect else None
+        if ping_res:
+            status_details["celery"] = "healthy"
+        else:
+            status_details["celery"] = "unhealthy: no active celery workers found"
+            status_details["status"] = "unhealthy"
+    except Exception as e:
+        status_details["celery"] = f"unhealthy: {str(e)}"
+        status_details["status"] = "unhealthy"
+
+    # 4. Storage (ImageKit) Check
+    try:
+        ik = ImageKitService.get_instance()
+        if not ik or not all([
+            getattr(settings, 'IMAGEKIT_PUBLIC_KEY', None),
+            getattr(settings, 'IMAGEKIT_PRIVATE_KEY', None),
+            getattr(settings, 'IMAGEKIT_URL_ENDPOINT', None),
+        ]):
+            status_details["storage"] = "unhealthy: ImageKit client not configured or missing credentials"
+            status_details["status"] = "unhealthy"
+    except Exception as e:
+        status_details["storage"] = f"unhealthy: {str(e)}"
+        status_details["status"] = "unhealthy"
+
+    # 5. AI Provider (Gemini) Check
+    try:
+        gemini_key = getattr(settings, 'GEMINI_API_KEY', None)
+        if not gemini_key:
+            status_details["gemini"] = "unhealthy: GEMINI_API_KEY missing"
+            status_details["status"] = "unhealthy"
+        else:
+            from google.genai import Client
+            client = Client(api_key=gemini_key)
+            if not client:
+                status_details["gemini"] = "unhealthy: failed to initialize Gemini client"
+                status_details["status"] = "unhealthy"
+    except Exception as e:
+        status_details["gemini"] = f"unhealthy: {str(e)}"
+        status_details["status"] = "unhealthy"
+
+    status_code = 200 if status_details["status"] == "healthy" else 503
+    return JsonResponse(status_details, status=status_code)
+
+def readiness_check(request):
+    """Deep API readiness check that validates DB and Redis connectivity."""
+    status_details = {
+        "status": "ready",
+        "database": "healthy",
+        "redis": "healthy",
+        "timestamp": timezone.now().isoformat()
+    }
+    
+    # Verify Database connectivity
+    try:
+        db_conn = connections['default']
+        db_conn.cursor()
+    except Exception as e:
+        status_details["database"] = f"unhealthy: {str(e)}"
+        status_details["status"] = "unready"
+        
+    # Verify Redis connectivity
+    try:
+        cache.set("readiness_test_key", "ok", timeout=5)
+        if cache.get("readiness_test_key") != "ok":
+            status_details["redis"] = "unhealthy: cache validation failed"
+            status_details["status"] = "unready"
+    except Exception as e:
+        status_details["redis"] = f"unhealthy: {str(e)}"
+        status_details["status"] = "unready"
+        
+    status_code = 200 if status_details["status"] == "ready" else 503
+    return JsonResponse(status_details, status=status_code)
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # Server-side image upload endpoint
@@ -139,6 +254,10 @@ urlpatterns = [
     path("api/payroll/", include("payroll.urls")),
     path("api/performance/", include("performance.urls")),
     path("api/search/", include("searchfilters.urls")),
+    
+    # Health checks
+    path("api/health/", liveness_check, name="liveness-check"),
+    path("api/readiness/", readiness_check, name="readiness-check"),
 ]
 from django.conf import settings
 from django.conf.urls.static import static

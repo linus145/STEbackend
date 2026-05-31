@@ -86,9 +86,41 @@ class PerformanceReviewViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         org = resolve_organization_for_user(self.request.user)
         if not org:
             return Response({"status": "error", "message": "No organization profile found."}, status=status.HTTP_404_NOT_FOUND)
-        from performance.services import PerformanceCalculationService
-        insights_data = PerformanceCalculationService.generate_ai_insights(org)
-        return Response(insights_data)
+        
+        from performance.models import PerformanceAIInsight
+        
+        if request.method == 'GET':
+            insight_obj = PerformanceAIInsight.objects.filter(organization=org).first()
+            if not insight_obj:
+                return Response({
+                    "status": "NOT_STARTED",
+                    "insights": {},
+                    "updated_at": None
+                })
+            return Response({
+                "status": insight_obj.status,
+                "insights": insight_obj.insights or {},
+                "updated_at": insight_obj.updated_at
+            })
+            
+        elif request.method == 'POST':
+            insight_obj, created = PerformanceAIInsight.objects.get_or_create(
+                organization=org,
+                defaults={"status": "PENDING"}
+            )
+            
+            # Reset status to PENDING and always dispatch a Celery worker run on POST
+            insight_obj.status = "PENDING"
+            insight_obj.save()
+            
+            from performance.tasks import task_generate_ai_insights
+            task_generate_ai_insights.delay(str(org.id))
+            
+            return Response({
+                "status": "PENDING",
+                "insights": insight_obj.insights or {},
+                "updated_at": insight_obj.updated_at
+            })
 
 class EmployeeFeedbackViewSet(viewsets.ModelViewSet):
     queryset = EmployeeFeedback.objects.select_related('provider', 'review__employee').all()

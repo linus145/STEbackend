@@ -47,18 +47,13 @@ from payroll.tasks import (
     task_reject_payroll_cycle,
 )
 from startups.models import Startup
+from rest_framework.permissions import IsAuthenticated
+from subscription.utils import HasHRToolkitPermission
 
 
 def get_active_startup(request):
     user = request.user
     if not user or user.is_anonymous:
-        st = Startup.objects.first()
-        if st:
-            return st
-        from organization.models import Organization
-        org = Organization.objects.first()
-        if org and org.startup:
-            return org.startup
         return None
 
     # 1. Try company profile via Organization relation first (as HR tool is linked to organization)
@@ -66,55 +61,23 @@ def get_active_startup(request):
     if company:
         from organization.models import Organization
         org = Organization.objects.filter(company=company).first()
-        if not org:
-            org = Organization.objects.create(
-                company=company, name=company.company_name
-            )
-        if not org.startup:
-            st = Startup.objects.filter(founder=user, name=company.company_name).first()
-            if not st:
-                st = Startup.objects.filter(founder=user).first()
-            if not st:
-                st = Startup.objects.first()
-            if not st:
-                st = Startup.objects.create(
-                    founder=user,
-                    name=company.company_name,
-                    pitch=company.description or f"Startup profile for {company.company_name}",
-                    industry=company.industry or "Technology",
-                    stage="Bootstrap",
-                    website_url=company.website,
-                    logo_url=company.logo_url
-                )
-            org.startup = st
-            org.save()
-        return org.startup
+        if org and org.startup:
+            return org.startup
+        # Fallback to check startup owned by user
+        st = Startup.objects.filter(founder=user).first()
+        if st:
+            return st
+        if org:
+            return org.startup
+        return None
 
     # 2. Try employee profile
     employee = getattr(user, "employee_profile", None)
     if employee:
         if getattr(employee, "startup", None):
             return employee.startup
-        if getattr(employee, "organization", None):
-            org = employee.organization
-            if not org.startup:
-                # Heal it!
-                st = Startup.objects.first()
-                if not st and org.company and org.company.owner:
-                    st = Startup.objects.create(
-                        founder=org.company.owner,
-                        name=org.name,
-                        pitch=org.description or f"Startup profile for {org.name}",
-                        industry=org.industry or "Technology",
-                        stage="Bootstrap",
-                        website_url=org.website,
-                        logo_url=org.logo_url
-                    )
-                if st:
-                    org.startup = st
-                    org.save()
-            if org.startup:
-                return org.startup
+        if getattr(employee, "organization", None) and employee.organization.startup:
+            return employee.organization.startup
 
     # 3. Try startups direct relation
     if hasattr(user, 'startups'):
@@ -122,44 +85,25 @@ def get_active_startup(request):
         if startup:
             return startup
             
-    # 4. Fallback to first startup
-    st = Startup.objects.first()
-    if st:
-        return st
-        
-    from organization.models import Organization
-    org = Organization.objects.first()
-    if org:
-        if not org.startup and org.company and org.company.owner:
-            org.startup = Startup.objects.create(
-                founder=org.company.owner,
-                name=org.name,
-                pitch=org.description or f"Startup profile for {org.name}",
-                industry=org.industry or "Technology",
-                stage="Bootstrap",
-                website_url=org.website,
-                logo_url=org.logo_url
-            )
-            org.save()
-        if org.startup:
-            return org.startup
-        
     return None
 
 
 class AllowanceViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = Allowance.objects.all()
     serializer_class = AllowanceSerializer
     search_fields = ["name"]
 
 
 class DeductionViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = Deduction.objects.all()
     serializer_class = DeductionSerializer
     search_fields = ["name"]
 
 
 class SalaryStructureViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = (
         SalaryStructure.objects.select_related("employee")
         .prefetch_related("employeeallowance_set", "employeededuction_set")
@@ -169,6 +113,14 @@ class SalaryStructureViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().select_related("employee").prefetch_related("employeeallowance_set", "employeededuction_set")
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Permanently hard-deletes the salary structure from the database.
+        """
+        instance = self.get_object()
+        instance.hard_delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @decorators.action(detail=False, methods=["post"])
     def assign_allowance(self, request):
@@ -200,6 +152,7 @@ class SalaryStructureViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
 
 class ReimbursementViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = Reimbursement.objects.select_related("employee").all()
     serializer_class = ReimbursementSerializer
     filterset_fields = ["approval_status", "category"]
@@ -246,6 +199,7 @@ class ReimbursementViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
 
 class PayrollAdjustmentViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = PayrollAdjustment.objects.select_related("employee").all()
     serializer_class = PayrollAdjustmentSerializer
 
@@ -254,11 +208,13 @@ class PayrollAdjustmentViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
 
 class TaxConfigurationViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = TaxConfiguration.objects.all()
     serializer_class = TaxConfigurationSerializer
 
 
 class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = Payroll.objects.prefetch_related("payslips", "records").all()
     serializer_class = PayrollSerializer
 
@@ -461,10 +417,17 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
 
 class PayslipViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = Payslip.objects.select_related("employee", "payroll").all()
     serializer_class = PayslipSerializer
 
     def get_queryset(self):
+        from subscription.utils import check_subscription_feature
+        from rest_framework.exceptions import PermissionDenied
+
+        if not self.request.user.is_superuser and not check_subscription_feature(self.request.user, "has_hr_toolkit"):
+            raise PermissionDenied("This feature requires an active HRMS/Enterprise subscription plan.")
+
         startup = get_active_startup(self.request)
         if not startup:
             return Payslip.objects.none()
@@ -512,6 +475,8 @@ class PayslipViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class PayrollDashboardViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
+
     def list(self, request):
         startup = get_active_startup(request)
         if not startup:
@@ -575,6 +540,8 @@ class PayrollDashboardViewSet(viewsets.ViewSet):
 
 
 class PayrollApprovalsViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
+
     def list(self, request):
         startup = get_active_startup(request)
         if not startup:
@@ -585,6 +552,8 @@ class PayrollApprovalsViewSet(viewsets.ViewSet):
 
 
 class PayrollReportsViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
+
     def list(self, request):
         startup = get_active_startup(request)
         if not startup:
@@ -617,6 +586,8 @@ class PayrollReportsViewSet(viewsets.ViewSet):
 
 
 class PayrollSettingsViewSet(viewsets.ViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
+
     def list(self, request):
         startup = get_active_startup(request)
         if not startup:
@@ -682,6 +653,7 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
 
 
 class DocumentTemplateViewSet(StartupTenantMixin, viewsets.ModelViewSet):
+    permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = DocumentTemplate.objects.all()
     serializer_class = DocumentTemplateSerializer
     search_fields = ["name", "category"]

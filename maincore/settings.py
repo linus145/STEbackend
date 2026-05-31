@@ -22,20 +22,24 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from .env file
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
+ENV = os.environ.get("ENV", "production")
+DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-nrup%h72z2z)#b%c#wpk(qvmrtr^)s(4a_rola*8*ll-(5pxq6"
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG or ENV != "production":
+        SECRET_KEY = "django-insecure-nrup%h72z2z)#b%c#wpk(qvmrtr^)s(4a_rola*8*ll-(5pxq6"
+    else:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY environment variable is required in production.")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = True
 # DEBUG = False
-
-
-ENV = os.environ.get("ENV", "production")
-DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [
     "b2linq.in",
@@ -48,7 +52,7 @@ ALLOWED_HOSTS = [
 if not DEBUG and ENV == "production":
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = False  # Let Nginx handle HTTP -> HTTPS redirects; set to False since Nginx terminates SSL
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     X_FRAME_OPTIONS = "DENY"
@@ -183,6 +187,8 @@ DATABASES = {
         "PASSWORD": os.environ.get("DB_PASSWORD", ""),
         "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
         "PORT": os.environ.get("DB_PORT", "5432"),
+        "CONN_MAX_AGE": 600,  # Keep connections alive for 10 minutes to reduce overhead
+        "CONN_HEALTH_CHECKS": True,  # Test stale connections before re-using
     }
 }
 
@@ -326,12 +332,8 @@ SIMPLE_JWT = {
     "AUTH_COOKIE_SAMESITE": "Lax" if DEBUG else "Strict",
 }
 
-# Nginx Reverse Proxy SSL Termination Settings
-# Tells Django that if the X-Forwarded-Proto header says 'https', the request is secure
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-
 # Let Nginx handle HTTP -> HTTPS redirects. If Django does this behind Nginx, it causes an infinite redirect loop.
-SECURE_SSL_REDIRECT = False
+# Defined in the main security headers section above to prevent overrides.
 
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG

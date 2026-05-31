@@ -57,15 +57,22 @@ class AIScreeningHistoryView(APIView):
         )
 
 
+from subscription.utils import HasAIScreeningPermission
+
 class AnalyzeResumesView(APIView, ResponseMixin):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIScreeningPermission)
 
     def post(self, request, job_id):
         try:
-            job = JobPost.objects.get(id=job_id)
+            job = JobPost.objects.select_related("company").get(id=job_id)
         except JobPost.DoesNotExist:
             return self.build_response(
                 "error", "Job post not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        if not hasattr(request.user, "company_profile") or job.company != request.user.company_profile:
+            return self.build_response(
+                "error", "Unauthorized access to job post.", {}, status.HTTP_403_FORBIDDEN
             )
 
         # 1. Get Applications
@@ -219,6 +226,23 @@ class AIPlanChatView(APIView, ResponseMixin):
 
         if not user_message:
             return self.build_response("error", "Message is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        # 1. Prompt Injection Protection & Input Sanitization
+        injection_keywords = [
+            "ignore previous instructions", "ignore all previous", "system prompt",
+            "developer mode", "you are now a", "jailbreak", "override instructions",
+            "forget your instructions", "bypass limit", "expose knowledge"
+        ]
+        message_lower = user_message.lower()
+        if any(keyword in message_lower for keyword in injection_keywords) or len(user_message) > 1000:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Potential prompt injection or oversized message detected from user: {request.user.email}")
+            return self.build_response(
+                "success", 
+                "Reply generated.", 
+                {"reply": "I'm sorry, but I can only answer questions about recruitment, applicant settings, and standard HR workflows."}
+            )
 
         api_key = getattr(settings, "GEMINI_API_KEY", None)
         if not api_key:

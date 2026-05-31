@@ -1,6 +1,7 @@
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
+from subscription.utils import HasAIInterviewPermission
 from AIrounds.models import InterviewRound, InterviewQuestion, InterviewSession
 from AIrounds.services.engine_service import InterviewEngineService
 from AIrounds.services.evaluation import InterviewEvaluationService
@@ -41,6 +42,9 @@ class StartInterviewView(APIView, ResponseMixin):
             if error:
                 return self.build_response("error", error, {}, status.HTTP_403_FORBIDDEN)
             
+            if session.candidate != request.user:
+                return self.build_response("error", "Unauthorized access to session.", {}, status.HTTP_403_FORBIDDEN)
+                
             # Activate session if pending
             if session.status == 'PENDING':
                 session.status = 'ACTIVE'
@@ -87,7 +91,9 @@ class GetNextQuestionView(APIView, ResponseMixin):
     def post(self, request, round_id):
         """Generates the next question for a given round."""
         try:
-            round_obj = InterviewRound.objects.get(id=round_id)
+            round_obj = InterviewRound.objects.select_related("session").get(id=round_id)
+            if round_obj.session.candidate != request.user:
+                return self.build_response("error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN)
             session_id = round_obj.session.id
             
             question_data = InterviewEngineService.generate_next_question(session_id, round_id)
@@ -108,7 +114,9 @@ class SubmitAnswerView(APIView, ResponseMixin):
             return self.build_response("error", "answer is required.", {}, status.HTTP_400_BAD_REQUEST)
 
         try:
-            question = InterviewQuestion.objects.get(id=question_id)
+            question = InterviewQuestion.objects.select_related("round__session").get(id=question_id)
+            if question.round.session.candidate != request.user:
+                return self.build_response("error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN)
             round_obj = question.round
             session_id = round_obj.session.id
             
@@ -128,7 +136,9 @@ class GetRoundSummaryView(APIView, ResponseMixin):
     def post(self, request, round_id):
         """Completes the round and returns a final summary."""
         try:
-            round_obj = InterviewRound.objects.get(id=round_id)
+            round_obj = InterviewRound.objects.select_related("session").get(id=round_id)
+            if round_obj.session.candidate != request.user:
+                return self.build_response("error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN)
             session_id = round_obj.session.id
             
             summary = InterviewEvaluationService.generate_round_summary(session_id, round_id)
@@ -165,9 +175,28 @@ class GenerateFinalReportView(APIView, ResponseMixin):
     """
     Step 11: Final synthesis of all rounds into a hiring report.
     """
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
 
     def post(self, request, session_id):
+        from startups.models import CompanyProfile
+
+        try:
+            session = InterviewSession.objects.select_related("application__job__company").get(id=session_id)
+        except InterviewSession.DoesNotExist:
+            return self.build_response("error", "Session not found.", {}, status.HTTP_404_NOT_FOUND)
+
+        try:
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        if session.application and session.application.job.company != company:
+            return self.build_response(
+                "error", "Unauthorized access.", {}, status.HTTP_403_FORBIDDEN
+            )
+
         try:
             report = InterviewReporter.generate_final_report(session_id)
             return self.build_response("success", "Final interview report generated.", report)

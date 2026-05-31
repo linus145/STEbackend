@@ -51,6 +51,50 @@ class AttendanceViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     search_fields = ['employee__first_name', 'employee__last_name', 'date']
     ordering_fields = ['date']
 
+    def get_queryset(self):
+        user = self.request.user
+        if not user or user.is_anonymous:
+            return Attendance.objects.none()
+
+        # Get tenant-filtered base queryset
+        queryset = super().get_queryset()
+
+        # 1. HR Manager / Owner account (has company_profile)
+        company = getattr(user, "company_profile", None)
+        if company:
+            from organization.models import Organization
+            organization = Organization.objects.filter(company=company).first()
+            if organization:
+                queryset = queryset.filter(employee__organization=organization)
+            else:
+                queryset = queryset.none()
+        else:
+            # 2. Check if user is an Admin/HR via designation, groups or superuser status
+            employee = getattr(user, "employee_profile", None)
+            is_admin_or_hr = (
+                user.is_superuser or
+                user.groups.filter(name__in=["Admin", "HR", "Payroll Manager", "Recruiter"]).exists() or
+                (employee and employee.designation and employee.designation.title.upper() in ["ADMIN", "HR", "HR MANAGER", "PAYROLL MANAGER", "OPERATIONS", "OWNER"])
+            )
+
+            if not is_admin_or_hr:
+                # 3. Standard employee sees only their own attendance
+                if employee:
+                    queryset = queryset.filter(employee=employee)
+                else:
+                    queryset = queryset.none()
+
+        # Apply query parameter filters (for search and page filters)
+        date_param = self.request.query_params.get('date')
+        if date_param:
+            queryset = queryset.filter(date=date_param)
+
+        employee_param = self.request.query_params.get('employee')
+        if employee_param:
+            queryset = queryset.filter(employee_id=employee_param)
+
+        return queryset
+
     def perform_destroy(self, instance):
         instance.hard_delete()
 
@@ -193,3 +237,28 @@ class AttendanceViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
         attendance.save()
         return Response(AttendanceSerializer(attendance).data)
+
+    @decorators.action(detail=False, methods=['get'])
+    def monthly_summary(self, request):
+        """
+        Returns total hours worked in the current month for the logged-in user.
+        """
+        employee = getattr(request.user, 'employee_profile', None)
+        if not employee:
+            from employees.models import Employee
+            employee = Employee.objects.filter(email=request.user.email).first()
+            
+        if not employee:
+            return Response({"total_monthly_hours": 0.00}, status=status.HTTP_200_OK)
+        
+        from django.db.models import Sum
+        today = timezone.now().date()
+        first_day_of_month = today.replace(day=1)
+        
+        total = Attendance.objects.filter(
+            employee=employee,
+            date__gte=first_day_of_month,
+            date__lte=today
+        ).aggregate(total=Sum('total_work_hours'))['total'] or 0.00
+        
+        return Response({"total_monthly_hours": float(total)}, status=status.HTTP_200_OK)

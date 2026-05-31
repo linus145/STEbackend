@@ -242,3 +242,29 @@ class PerformanceScoreBreakdown(SoftDeleteModel):
 
     def __str__(self):
         return f"Breakdown for {self.review.employee} - Score: {self.final_calculated_score}%"
+
+
+class PerformanceAIInsight(SoftDeleteModel):
+    """
+    Stores AI generated recommendations, flight risks, and skill gaps for organizations dynamically.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.OneToOneField(
+        'organization.Organization', 
+        on_delete=models.CASCADE, 
+        related_name='ai_insight',
+        null=True,
+        blank=True
+    )
+    insights = models.JSONField(default=dict, blank=True, null=True)
+    status = models.CharField(
+        max_length=20, 
+        choices=[('PENDING', 'Pending'), ('SUCCESS', 'Success'), ('FAILED', 'Failed')], 
+        default='PENDING'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        org_name = self.organization.name if self.organization else "Global"
+        return f"AI Insights for {org_name}"

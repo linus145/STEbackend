@@ -19,6 +19,14 @@ def task_generate_monthly_payroll(startup_id, month, year):
         return {"payroll_id": str(payroll.id), "employee_count": count}
     except Exception as e:
         logger.error(f"Error executing task_generate_monthly_payroll: {e}")
+        try:
+            from payroll.models import Payroll
+            payroll = Payroll.objects.filter(startup_id=startup_id, month=int(month), year=int(year)).first()
+            if payroll:
+                payroll.status = 'FAILED'
+                payroll.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition payroll to FAILED status: {ex}")
         raise e
 
 @shared_task
@@ -27,13 +35,18 @@ def task_approve_payroll_cycle(payroll_id, approver_user_id):
     Celery task to lock salary values, finalize reimbursements, publish payslips, and dispatch PDFs.
     """
     try:
-        payroll = Payroll.objects.get(id=payroll_id)
-        user = CustomUser.objects.get(id=approver_user_id)
-        success = PayrollApprovalService.approve_payroll_cycle(payroll, user)
+        success = PayrollApprovalService.approve_payroll_cycle(payroll_id, approver_user_id)
         logger.info(f"Successfully approved payroll cycle {payroll_id} in background by User {approver_user_id}.")
         return {"success": success}
     except Exception as e:
         logger.error(f"Error executing task_approve_payroll_cycle: {e}")
+        try:
+            from payroll.models import Payroll
+            payroll = Payroll.objects.get(id=payroll_id)
+            payroll.status = 'FAILED'
+            payroll.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition payroll status to FAILED: {ex}")
         raise e
 
 @shared_task
@@ -42,12 +55,18 @@ def task_reject_payroll_cycle(payroll_id):
     Celery task to reject processed calculations and revert cycle back to corrections draft.
     """
     try:
-        payroll = Payroll.objects.get(id=payroll_id)
-        success = PayrollApprovalService.reject_payroll_cycle(payroll)
+        success = PayrollApprovalService.reject_payroll_cycle(payroll_id)
         logger.info(f"Successfully rejected payroll cycle {payroll_id} in background.")
         return {"success": success}
     except Exception as e:
         logger.error(f"Error executing task_reject_payroll_cycle: {e}")
+        try:
+            from payroll.models import Payroll
+            payroll = Payroll.objects.get(id=payroll_id)
+            payroll.status = 'FAILED'
+            payroll.save(update_fields=['status'])
+        except Exception as ex:
+            logger.error(f"Failed to transition payroll status to FAILED: {ex}")
         raise e
 
 @shared_task

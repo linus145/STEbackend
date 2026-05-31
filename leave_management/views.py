@@ -77,18 +77,31 @@ class LeaveRequestViewSet(StartupTenantMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        queryset = self.queryset
+        
         # HR manager/owner sees all leave requests from their organization's employees
         company = getattr(user, "company_profile", None)
         if company:
             from organization.models import Organization
             organization = Organization.objects.filter(company=company).first()
             if organization:
-                return self.queryset.filter(employee__organization=organization)
-        # Standard employee sees only their own
-        employee = getattr(user, "employee_profile", None)
-        if employee:
-            return self.queryset.filter(employee=employee)
-        return self.queryset.none()
+                queryset = queryset.filter(employee__organization=organization)
+            else:
+                queryset = self.queryset.none()
+        else:
+            # Standard employee sees only their own
+            employee = getattr(user, "employee_profile", None)
+            if employee:
+                queryset = queryset.filter(employee=employee)
+            else:
+                queryset = self.queryset.none()
+
+        # Status filter for pagination support
+        status_param = self.request.query_params.get("status")
+        if status_param and queryset.exists():
+            queryset = queryset.filter(status__iexact=status_param)
+
+        return queryset
 
     def perform_create(self, serializer):
         employee = getattr(self.request.user, "employee_profile", None)

@@ -42,10 +42,16 @@ class EmployeeBankDetailSerializer(serializers.ModelSerializer):
         model = EmployeeBankDetail
         exclude = ['employee', 'organization']
 
+class EmployeeSimpleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = ['id', 'first_name', 'last_name', 'email', 'employee_id']
+
 class EmployeeSerializer(serializers.ModelSerializer):
     department_detail = DepartmentSerializer(source='department', read_only=True)
     designation_detail = DesignationSerializer(source='designation', read_only=True)
     profile_details = EmployeeProfileSerializer(read_only=True)
+    reporting_manager_detail = EmployeeSimpleSerializer(source='reporting_manager', read_only=True)
     
     designation = serializers.PrimaryKeyRelatedField(
         queryset=Designation.objects.all(),
@@ -71,8 +77,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'id', 'startup', 'user', 'employee_id', 'first_name', 'last_name', 
             'email', 'phone', 'designation', 'designation_detail', 
             'department', 'department_detail', 'joining_date', 
-            'employment_type', 'reporting_manager', 'salary', 'avatar', 
-            'address', 'status', 'profile_details', 'job_application', 
+            'employment_type', 'reporting_manager', 'reporting_manager_detail', 'salary', 'avatar', 
+            'address', 'status', 'role', 'profile_details', 'job_application', 
             'aadhaar_detail', 'pan_detail', 'joining_detail', 'bank_detail',
             'created_at', 'updated_at', 'portal_username', 'portal_password', 'password'
         ]
@@ -145,17 +151,29 @@ class EmployeeSerializer(serializers.ModelSerializer):
         # and use the "Set Password & Send Credentials" button to send the email.
         
         if aadhaar_data is not None:
-            EmployeeAadhaarDetail.objects.create(employee=instance, organization=instance.organization, **aadhaar_data)
+            detail, _ = EmployeeAadhaarDetail.objects.get_or_create(employee=instance, defaults={'organization': instance.organization})
+            for k, v in aadhaar_data.items():
+                setattr(detail, k, v)
+            detail.save()
         else:
             EmployeeAadhaarDetail.objects.get_or_create(employee=instance, organization=instance.organization)
             
         if pan_data is not None:
-            EmployeePANDetail.objects.create(employee=instance, organization=instance.organization, **pan_data)
+            detail, _ = EmployeePANDetail.objects.get_or_create(employee=instance, defaults={'organization': instance.organization})
+            for k, v in pan_data.items():
+                setattr(detail, k, v)
+            detail.save()
         else:
             EmployeePANDetail.objects.get_or_create(employee=instance, organization=instance.organization)
             
         if joining_data is not None:
-            EmployeeJoiningDetail.objects.create(employee=instance, organization=instance.organization, **joining_data)
+            detail, _ = EmployeeJoiningDetail.objects.get_or_create(
+                employee=instance, 
+                defaults={'organization': instance.organization, 'joining_date': instance.joining_date}
+            )
+            for k, v in joining_data.items():
+                setattr(detail, k, v)
+            detail.save()
         else:
             EmployeeJoiningDetail.objects.get_or_create(
                 employee=instance, 
@@ -164,7 +182,10 @@ class EmployeeSerializer(serializers.ModelSerializer):
             )
             
         if bank_data is not None:
-            EmployeeBankDetail.objects.create(employee=instance, organization=instance.organization, **bank_data)
+            detail, _ = EmployeeBankDetail.objects.get_or_create(employee=instance, defaults={'organization': instance.organization})
+            for k, v in bank_data.items():
+                setattr(detail, k, v)
+            detail.save()
         else:
             EmployeeBankDetail.objects.get_or_create(employee=instance, organization=instance.organization)
             

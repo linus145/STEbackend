@@ -49,14 +49,55 @@ class EmailService:
     @staticmethod
     def verify_otp(user: CustomUser, otp: str):
         """Verifies the OTP and marks the user as verified if correct."""
-        if not user.otp or user.otp != otp:
-            return False, "Invalid verification code."
+        from django.core.cache import cache
+        import hmac
 
-        # Check expiration (10 minutes)
+        user_id = user.id
+        lockout_key = f"otp_lockout_{user_id}"
+        attempts_key = f"otp_failed_attempts_{user_id}"
+        
+        # 1. Check lockout
+        if cache.get(lockout_key):
+            return False, "Too many failed attempts. Please try again in 10 minutes."
+            
+        # 2. Check if user has an active OTP set
+        if not user.otp:
+            return False, "No active verification code found."
+
+        # 3. Check expiration (10 minutes)
         if user.otp_created_at:
             expiration_time = user.otp_created_at + timezone.timedelta(minutes=10)
             if timezone.now() > expiration_time:
+                # Invalidate expired OTP
+                user.otp = None
+                user.otp_created_at = None
+                user.save(update_fields=['otp', 'otp_created_at'])
                 return False, "Verification code has expired."
+
+        # 4. Timing-safe comparison using hmac.compare_digest
+        is_valid = hmac.compare_digest(str(user.otp), str(otp))
+        
+        if not is_valid:
+            # Increment failed attempts
+            failed_count = cache.get(attempts_key, 0) + 1
+            if failed_count >= 5:
+                # Lock out for 10 minutes
+                cache.set(lockout_key, True, timeout=600)
+                cache.delete(attempts_key)
+                
+                # Invalidate OTP for security
+                user.otp = None
+                user.otp_created_at = None
+                user.save(update_fields=['otp', 'otp_created_at'])
+                return False, "Too many failed attempts. Verification code has been invalidated. Please request a new one."
+            else:
+                cache.set(attempts_key, failed_count, timeout=600)
+                remaining = 5 - failed_count
+                return False, f"Invalid verification code. {remaining} attempt(s) remaining."
+
+        # 5. Success - Clear cache trackers
+        cache.delete(lockout_key)
+        cache.delete(attempts_key)
 
         user.is_verified = True
         user.otp = None

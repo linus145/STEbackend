@@ -15,6 +15,7 @@ from employees.serializers import (
     EmployeeDocumentSerializer,
 )
 from organization.views import StartupTenantMixin
+from maincore.pagination import StandardResultsSetPagination
 
 from rest_framework.decorators import action
 
@@ -25,6 +26,7 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     ).all()
     serializer_class = EmployeeSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
         # 1. Retrieve the base tenant-scoped queryset from StartupTenantMixin
@@ -37,6 +39,7 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             "employment_type": self.request.query_params.get("employment_type"),
             "department": self.request.query_params.get("department"),
             "designation": self.request.query_params.get("designation"),
+            "role": self.request.query_params.get("role"),
             "joining_date__gte": self.request.query_params.get("joining_date__gte"),
             "joining_date__lte": self.request.query_params.get("joining_date__lte"),
             "ordering": self.request.query_params.get("ordering"),
@@ -297,6 +300,7 @@ class EmployeeLoginView(APIView):
     def post(self, request, *args, **kwargs):
         username_or_email = request.data.get("email") or request.data.get("username")
         password = request.data.get("password")
+        expected_role = request.data.get("role")  # Optional role filter: "EMPLOYEE" or "MANAGER"
 
         if not username_or_email or not password:
             return Response(
@@ -310,6 +314,22 @@ class EmployeeLoginView(APIView):
             user, tokens = EmployeeService.authenticate_employee(
                 username_or_email, password
             )
+            
+            # Check portal role boundaries if expected_role is provided
+            if expected_role:
+                emp_profile = getattr(user, 'employee_profile', None)
+                if not emp_profile:
+                    return Response(
+                        {"error": "This user account is not associated with an Employee profile."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                if emp_profile.role.upper() != expected_role.upper():
+                    role_display = emp_profile.get_role_display()
+                    return Response(
+                        {"error": f"Role mismatch. Your account is registered as an '{role_display}' and cannot log in as '{expected_role.capitalize()}'."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
             response = Response(
                 {
                     "status": "success",

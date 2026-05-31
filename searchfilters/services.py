@@ -187,6 +187,8 @@ class SearchService:
             queryset = queryset.filter(department_id=filters["department"])
         if filters.get("designation"):
             queryset = queryset.filter(designation_id=filters["designation"])
+        if filters.get("role"):
+            queryset = queryset.filter(role=filters["role"])
 
         # Date range
         joining_date__gte = filters.get("joining_date__gte")

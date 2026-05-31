@@ -84,6 +84,19 @@ class ImageUploadView(APIView):
                 status=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             )
 
+        # 3.5. Validate file extension
+        import os
+        ext = os.path.splitext(file.name.lower())[1]
+        ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.avif', '.mp4', '.webm', '.mov', '.qt']
+        if ext not in ALLOWED_EXTENSIONS:
+            return Response(
+                {
+                    "error": f"Unsupported file extension: {ext}",
+                    "allowed_extensions": ALLOWED_EXTENSIONS,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # 4. Determine folder
         folder = request.data.get("folder", "/uploads")
         if not folder.startswith("/"):

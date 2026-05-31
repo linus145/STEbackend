@@ -22,6 +22,11 @@ class Employee(SoftDeleteModel):
         ('EXITED', 'Exited'),
     )
 
+    ROLE_CHOICES = (
+        ('EMPLOYEE', 'Employee'),
+        ('MANAGER', 'Manager'),
+    )
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     startup = models.ForeignKey(
         'startups.Startup', 
@@ -90,6 +95,9 @@ class Employee(SoftDeleteModel):
     address = models.TextField(blank=True)
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default='ON_BOARDING'
+    )
+    role = models.CharField(
+        max_length=20, choices=ROLE_CHOICES, default='EMPLOYEE', db_index=True
     )
     
     portal_username = models.CharField(max_length=150, unique=True, null=True, blank=True, db_index=True)
