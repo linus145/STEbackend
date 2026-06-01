@@ -252,6 +252,7 @@ urlpatterns = [
     path("api/leave_management/", include("leave_management.urls")),
     path("api/organization/", include("organization.urls")),
     path("api/payroll/", include("payroll.urls")),
+    path("api/api/payroll/", include("payroll.urls")),
     path("api/performance/", include("performance.urls")),
     path("api/search/", include("searchfilters.urls")),
     

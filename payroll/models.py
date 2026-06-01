@@ -117,6 +117,26 @@ class Payroll(SoftDeleteModel):
         related_name='approved_payrolls'
     )
     
+    finance_approved = models.BooleanField(default=False)
+    finance_approved_at = models.DateTimeField(null=True, blank=True)
+    finance_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='finance_approved_cycles'
+    )
+    
+    director_approved = models.BooleanField(default=False)
+    director_approved_at = models.DateTimeField(null=True, blank=True)
+    director_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='director_approved_cycles'
+    )
+    
     class Meta:
         unique_together = ('startup', 'month', 'year')
 
@@ -295,6 +315,25 @@ class PayrollSetting(SoftDeleteModel):
     automation_enabled = models.BooleanField(default=True)
     pf_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=12.00)
     esi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=1.75)
+    
+    finance_approval_required = models.BooleanField(default=False)
+    finance_manager = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='finance_approved_settings'
+    )
+    
+    director_approval_required = models.BooleanField(default=False)
+    director = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='director_approved_settings'
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -163,15 +163,20 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                     password=password,
                     first_name=employee.first_name,
                     last_name=employee.last_name,
-                    role='OPERATIONS'
+                    role='OPERATIONS',
+                    is_verified=True  # Employee accounts are HR-provisioned, no OTP verification needed
                 )
             else:
                 user.set_password(password)
+                user.is_verified = True  # Auto-verify existing accounts linked to employees
                 user.save()
             employee.user = user
             employee.save()
         else:
             employee.user.set_password(password)
+            # Ensure any existing linked user is marked verified
+            if not employee.user.is_verified:
+                employee.user.is_verified = True
             employee.user.save()
 
         # Store plaintext password for HR admin visibility
@@ -235,6 +240,45 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             if isinstance(msg, list) and len(msg) > 0:
                 msg = msg[0]
             return Response({"error": str(msg)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="change-password",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def change_password(self, request):
+        user = request.user
+        try:
+            employee = user.employee_profile
+        except Employee.DoesNotExist:
+            return Response(
+                {"error": "Employee profile not found for this user."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        password = request.data.get("password")
+        if not password or not password.strip():
+            return Response(
+                {"error": "Password cannot be empty."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Change on active Django auth User model
+            user.set_password(password)
+            user.save()
+
+            # Synchronize with Employee record for HR tool effectiveness
+            employee.portal_password = password
+            employee.save()
+
+            return Response(
+                {"message": "Password updated successfully and synchronized with HR records."},
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class EmergencyContactViewSet(StartupTenantMixin, viewsets.ModelViewSet):

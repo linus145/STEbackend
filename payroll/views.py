@@ -45,6 +45,8 @@ from payroll.tasks import (
     task_generate_monthly_payroll,
     task_approve_payroll_cycle,
     task_reject_payroll_cycle,
+    task_generate_payslip_pdf,
+    task_email_payslip,
 )
 from startups.models import Startup
 from rest_framework.permissions import IsAuthenticated
@@ -265,11 +267,88 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         Locks the payroll calculations, registers final payouts, marks claims paid, publishes payslips.
         """
         payroll = self.get_object()
+        if payroll.status != 'PROCESSED':
+            return Response({"error": f"Only processed payrolls can be approved. Current status is {payroll.status}"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Fetch startup's PayrollSetting
+        startup = get_active_startup(request)
+        if not startup:
+            return Response({"error": "No active startup context."}, status=status.HTTP_400_BAD_REQUEST)
+            
+        settings, created = PayrollSetting.objects.get_or_create(
+            startup=startup,
+            defaults={
+                "currency": "INR",
+                "automation_enabled": True,
+                "pf_percentage": 12.00,
+                "esi_percentage": 1.75
+            }
+        )
+
+        # 1. Finance Manager Stage Check
+        if settings.finance_approval_required and not payroll.finance_approved:
+            # Current user must be the designated finance manager
+            if settings.finance_manager and request.user.id != settings.finance_manager.id:
+                return Response(
+                    {"error": "Only the designated Finance Manager can approve this stage."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            payroll.finance_approved = True
+            payroll.finance_approved_by = request.user
+            payroll.finance_approved_at = timezone.now()
+            
+            # If Director is also required, we save but DO NOT transition to APPROVED yet
+            if settings.director_approval_required and not payroll.director_approved:
+                payroll.save()
+                return Response({
+                    "message": "L1 (Finance Manager) approval recorded successfully. Awaiting L2 (Director) approval.",
+                    "payroll": PayrollSerializer(payroll).data,
+                })
+            
+            # If Director is not required, L1 approval is final
+            payroll.status = 'APPROVED'
+            payroll.save()
+            try:
+                task_approve_payroll_cycle.delay(str(payroll.id), str(request.user.id))
+                return Response({
+                    "message": "Payroll approved and finalized successfully.",
+                    "payroll": PayrollSerializer(payroll).data,
+                })
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Director Stage Check (Runs if L1 is done or not required)
+        if settings.director_approval_required and not payroll.director_approved:
+            # Current user must be the designated director
+            if settings.director and request.user.id != settings.director.id:
+                return Response(
+                    {"error": "Only the designated Director can approve this stage."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            payroll.director_approved = True
+            payroll.director_approved_by = request.user
+            payroll.director_approved_at = timezone.now()
+            payroll.status = 'APPROVED'
+            payroll.save()
+            try:
+                task_approve_payroll_cycle.delay(str(payroll.id), str(request.user.id))
+                return Response({
+                    "message": "Payroll final payout authorization and payslip PDF generation dispatched successfully.",
+                    "payroll": PayrollSerializer(payroll).data,
+                })
+            except Exception as e:
+                return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Direct/Standard Stage (No hierarchy required)
+        payroll.status = 'APPROVED'
+        payroll.save()
         try:
             task_approve_payroll_cycle.delay(str(payroll.id), str(request.user.id))
             return Response(
                 {
-                    "message": "Payroll final payout authorization and payslip PDF generation dispatched to background workers successfully.",
+                    "message": "Payroll approved and finalized successfully.",
                     "payroll": PayrollSerializer(payroll).data,
                 }
             )
@@ -282,6 +361,19 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         Rejects payroll and transitions status back to draft or correction.
         """
         payroll = self.get_object()
+        if payroll.status != 'PROCESSED':
+            return Response({"error": f"Only processed payrolls can be rejected. Current status is {payroll.status}"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Transition status synchronously to prevent UI race conditions
+        payroll.status = 'REJECTED'
+        payroll.finance_approved = False
+        payroll.finance_approved_by = None
+        payroll.finance_approved_at = None
+        payroll.director_approved = False
+        payroll.director_approved_by = None
+        payroll.director_approved_at = None
+        payroll.save()
+
         try:
             task_reject_payroll_cycle.delay(str(payroll.id))
             return Response(
@@ -443,21 +535,45 @@ class PayslipViewSet(viewsets.ReadOnlyModelViewSet):
             or hasattr(self.request.user, 'company_profile')
         )
         if not is_admin_or_hr:
-            return base_qs.filter(
+            base_qs = base_qs.filter(
                 employee__email=self.request.user.email, is_published=True
             )
 
-        return base_qs
+        # Delegate to the canonical searchfilters service for month/year/search filtering
+        from searchfilters.services import SearchService
+        filters = {
+            "month": self.request.query_params.get("month"),
+            "year": self.request.query_params.get("year"),
+            "search": self.request.query_params.get("search"),
+            "ordering": self.request.query_params.get("ordering"),
+        }
+        return SearchService.filter_payslips(base_qs, filters)
 
     @decorators.action(detail=True, methods=["get"])
     def download(self, request, pk=None):
         """
         Serves the generated payslip file for local download.
+        Supports lookup by Payslip ID or fallback to PayrollRecord ID.
         """
-        payslip = self.get_object()
-        if not payslip.pdf_file:
-            # Dynamically ensure one is written
+        queryset = self.filter_queryset(self.get_queryset())
+        payslip = queryset.filter(pk=pk).first()
+        if not payslip:
+            # Fallback: the UI might pass the PayrollRecord ID instead of the Payslip ID
+            payslip = queryset.filter(payroll_record_id=pk).first()
+
+        if not payslip:
+            from django.http import Http404
+            raise Http404("No Payslip matches the given query.")
+
+        # Force regenerate payslip PDF synchronously on download to ensure updates are reflected
+        try:
             PayslipGenerationService.async_generate_payslip_pdf(payslip)
+            payslip.refresh_from_db()
+        except Exception as e:
+            import logging
+            logging.getLogger("payroll.views").warning(
+                f"Synchronous PDF generation failed: {e}."
+            )
 
         if not payslip.pdf_file:
             return Response(
@@ -465,13 +581,63 @@ class PayslipViewSet(viewsets.ReadOnlyModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        file_path = payslip.pdf_file.path
-        with open(file_path, "rb") as f:
-            response = HttpResponse(f.read(), content_type="application/octet-stream")
-            response["Content-Disposition"] = (
-                f'attachment; filename="payslip_{payslip.employee.first_name}_{payslip.payroll.month}_{payslip.payroll.year}.txt"'
+        try:
+            with payslip.pdf_file.open("rb") as f:
+                file_content = f.read()
+        except Exception:
+            try:
+                with open(payslip.pdf_file.path, "rb") as f:
+                    file_content = f.read()
+            except Exception as e:
+                return Response(
+                    {"error": f"Failed to read payslip file: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+        file_basename = f"payslip_{payslip.employee.first_name}_{payslip.payroll.month}_{payslip.payroll.year}"
+        if payslip.pdf_file.name.endswith(".pdf"):
+            content_type = "application/pdf"
+            filename = f"{file_basename}.pdf"
+        else:
+            content_type = "application/octet-stream"
+            filename = f"{file_basename}.txt"
+
+        response = HttpResponse(file_content, content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    @decorators.action(detail=True, methods=["post"])
+    def send_email(self, request, pk=None):
+        """
+        Sends the payslip via email to the employee.
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        payslip = queryset.filter(pk=pk).first()
+        if not payslip:
+            payslip = queryset.filter(payroll_record_id=pk).first()
+
+        if not payslip:
+            return Response(
+                {"error": "No Payslip matches the given query."},
+                status=status.HTTP_404_NOT_FOUND,
             )
-            return response
+
+        task_email_payslip.delay(str(payslip.id))
+        return Response({"message": "Payslip email has been queued for sending."})
+
+    @decorators.action(detail=False, methods=["GET", "POST"])
+    def bulk_send_emails(self, request):
+        """
+        Bulk sends emails for all payslips matching the query filters (e.g. month & year).
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        # Filter to only send for published payslips
+        queryset = queryset.filter(is_published=True)
+        count = 0
+        for payslip in queryset:
+            task_email_payslip.delay(str(payslip.id))
+            count += 1
+        return Response({"message": f"Bulk sending process started for {count} payslips."})
 
 
 class PayrollDashboardViewSet(viewsets.ViewSet):
@@ -608,7 +774,13 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             "automation_enabled": settings.automation_enabled,
             "statutory_pf_percentage": float(settings.pf_percentage),
             "statutory_esi_percentage": float(settings.esi_percentage),
-            "compliance_status": "COMPLIANT"
+            "compliance_status": "COMPLIANT",
+            "finance_approval_required": settings.finance_approval_required,
+            "finance_manager": str(settings.finance_manager.id) if settings.finance_manager else None,
+            "finance_manager_name": f"{settings.finance_manager.employee_profile.first_name} {settings.finance_manager.employee_profile.last_name}" if settings.finance_manager and getattr(settings.finance_manager, 'employee_profile', None) else (settings.finance_manager.username if settings.finance_manager else None),
+            "director_approval_required": settings.director_approval_required,
+            "director": str(settings.director.id) if settings.director else None,
+            "director_name": f"{settings.director.employee_profile.first_name} {settings.director.employee_profile.last_name}" if settings.director and getattr(settings.director, 'employee_profile', None) else (settings.director.username if settings.director else None),
         })
 
     def create(self, request):
@@ -632,6 +804,11 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
         pf_percentage = request.data.get("statutory_pf_percentage") or request.data.get("pf_percentage")
         esi_percentage = request.data.get("statutory_esi_percentage") or request.data.get("esi_percentage")
         
+        finance_approval_required = request.data.get("finance_approval_required")
+        finance_manager_id = request.data.get("finance_manager")
+        director_approval_required = request.data.get("director_approval_required")
+        director_id = request.data.get("director")
+        
         if currency is not None:
             settings.currency = currency
         if automation_enabled is not None:
@@ -641,6 +818,30 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
         if esi_percentage is not None:
             settings.esi_percentage = Decimal(str(esi_percentage))
             
+        if finance_approval_required is not None:
+            settings.finance_approval_required = bool(finance_approval_required)
+        if finance_manager_id is not None:
+            if finance_manager_id == "":
+                settings.finance_manager = None
+            else:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                settings.finance_manager = User.objects.filter(id=finance_manager_id).first()
+        elif finance_approval_required is False:
+            settings.finance_manager = None
+
+        if director_approval_required is not None:
+            settings.director_approval_required = bool(director_approval_required)
+        if director_id is not None:
+            if director_id == "":
+                settings.director = None
+            else:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                settings.director = User.objects.filter(id=director_id).first()
+        elif director_approval_required is False:
+            settings.director = None
+            
         settings.save()
         return Response({
             "id": str(settings.id),
@@ -648,7 +849,13 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             "automation_enabled": settings.automation_enabled,
             "statutory_pf_percentage": float(settings.pf_percentage),
             "statutory_esi_percentage": float(settings.esi_percentage),
-            "compliance_status": "COMPLIANT"
+            "compliance_status": "COMPLIANT",
+            "finance_approval_required": settings.finance_approval_required,
+            "finance_manager": str(settings.finance_manager.id) if settings.finance_manager else None,
+            "finance_manager_name": f"{settings.finance_manager.employee_profile.first_name} {settings.finance_manager.employee_profile.last_name}" if settings.finance_manager and getattr(settings.finance_manager, 'employee_profile', None) else (settings.finance_manager.username if settings.finance_manager else None),
+            "director_approval_required": settings.director_approval_required,
+            "director": str(settings.director.id) if settings.director else None,
+            "director_name": f"{settings.director.employee_profile.first_name} {settings.director.employee_profile.last_name}" if settings.director and getattr(settings.director, 'employee_profile', None) else (settings.director.username if settings.director else None),
         })
 
 

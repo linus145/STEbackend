@@ -217,3 +217,60 @@ class SearchService:
             queryset = queryset.order_by("-created_at")
 
         return queryset
+
+    @staticmethod
+    def filter_payslips(queryset, filters: Dict[str, Any] = None):
+        """
+        Unified service in the searchfilters app for searching, filtering, and ordering payslip querysets.
+        Supports: search (employee name/id), month, year, ordering.
+        """
+        if not filters:
+            return queryset.order_by("-payroll__year", "-payroll__month")
+
+        # Basic text search (employee name or ID)
+        search_query = filters.get("search")
+        if search_query:
+            queryset = queryset.filter(
+                Q(employee__first_name__icontains=search_query)
+                | Q(employee__last_name__icontains=search_query)
+                | Q(employee__email__icontains=search_query)
+                | Q(employee__employee_id__icontains=search_query)
+            )
+
+        # Month filter (1-12)
+        month = filters.get("month")
+        if month:
+            try:
+                queryset = queryset.filter(payroll__month=int(month))
+            except (ValueError, TypeError):
+                pass
+
+        # Year filter
+        year = filters.get("year")
+        if year:
+            try:
+                queryset = queryset.filter(payroll__year=int(year))
+            except (ValueError, TypeError):
+                pass
+
+        # Ordering
+        ordering = filters.get("ordering")
+        if ordering:
+            allowed_orderings = [
+                "payroll__month",
+                "-payroll__month",
+                "payroll__year",
+                "-payroll__year",
+                "net_salary",
+                "-net_salary",
+                "created_at",
+                "-created_at",
+            ]
+            if ordering in allowed_orderings:
+                queryset = queryset.order_by(ordering)
+            else:
+                queryset = queryset.order_by("-payroll__year", "-payroll__month")
+        else:
+            queryset = queryset.order_by("-payroll__year", "-payroll__month")
+
+        return queryset

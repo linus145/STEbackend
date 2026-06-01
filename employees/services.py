@@ -1,6 +1,6 @@
 from django.core.mail import send_mail
 from django.conf import settings
-from rest_framework.exceptions import ValidationError, PermissionDenied, AuthenticationFailed
+from rest_framework.exceptions import PermissionDenied, AuthenticationFailed
 from employees.models import Employee
 from useraccounts.services import UserService
 
@@ -10,22 +10,19 @@ class EmployeeService:
         """
         Pure logic for authenticating an employee.
         Checks portal_username / email, verifies that the user is an active employee,
-        checks email verification, and returns the user & JWT tokens.
+        and returns the user & JWT tokens.
+
+        NOTE: Email verification (is_verified) is intentionally NOT checked here.
+        Employee accounts are provisioned directly by HR admins — they do not go
+        through the self-registration OTP flow that normal platform users follow.
         """
         user = UserService.authenticate_user(username_or_email, password)
         if not user:
             raise AuthenticationFailed("Invalid employee credentials.")
-            
+
         if not hasattr(user, 'employee_profile'):
             raise PermissionDenied("This account is not registered as an employee.")
-            
-        if not user.is_verified:
-            raise ValidationError({
-                "error": "Email not verified. Please verify your email using OTP.",
-                "email": user.email,
-                "is_verified": False
-            })
-            
+
         tokens = UserService.generate_tokens(user)
         return user, tokens
 

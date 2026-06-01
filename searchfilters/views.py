@@ -172,3 +172,60 @@ class GlobalUserSearchView(ListAPIView, ResponseMixin):
     def get_queryset(self):
         filters = {"search": self.request.query_params.get("search")}
         return SearchService.search_users(filters)
+
+
+class PayslipSearchView(ListAPIView, ResponseMixin):
+    """
+    GET: Search and filter payslips by month, year, employee name/ID.
+    Supports: ?search=&month=&year=&ordering=
+    """
+
+    permission_classes = (IsAuthenticated,)
+    pagination_class = StandardResultsSetPagination
+
+    def get_serializer_class(self):
+        from payroll.serializers import PayslipSerializer
+        return PayslipSerializer
+
+    def get_queryset(self):
+        from payroll.models import Payslip
+        from payroll.views import get_active_startup
+
+        startup = get_active_startup(self.request)
+        if not startup:
+            return Payslip.objects.none()
+
+        base_qs = Payslip.objects.select_related(
+            "employee", "payroll"
+        ).filter(employee__startup=startup)
+
+        # Security: non-admin employees can only see their own payslips
+        is_admin_or_hr = (
+            self.request.user.groups.filter(
+                name__in=["Admin", "HR", "Payroll Manager"]
+            ).exists()
+            or self.request.user.is_superuser
+            or hasattr(self.request.user, 'company_profile')
+        )
+        if not is_admin_or_hr:
+            base_qs = base_qs.filter(
+                employee__email=self.request.user.email, is_published=True
+            )
+
+        filters = {
+            "search": self.request.query_params.get("search"),
+            "month": self.request.query_params.get("month"),
+            "year": self.request.query_params.get("year"),
+            "ordering": self.request.query_params.get("ordering"),
+        }
+        return SearchService.filter_payslips(base_qs, filters)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return self.build_response("success", "Payslips fetched.", serializer.data)

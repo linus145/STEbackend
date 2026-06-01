@@ -151,13 +151,33 @@ class PayrollRecordSerializer(serializers.ModelSerializer):
 class PayrollSerializer(serializers.ModelSerializer):
     records_count = serializers.IntegerField(source='records.count', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.username', read_only=True)
+    finance_approved_by_name = serializers.SerializerMethodField()
+    director_approved_by_name = serializers.SerializerMethodField()
     
     class Meta:
         model = Payroll
         fields = [
             'id', 'startup', 'month', 'year', 'status', 'processed_at', 
-            'approved_by', 'approved_by_name', 'records_count'
+            'approved_by', 'approved_by_name', 'records_count',
+            'finance_approved', 'finance_approved_at', 'finance_approved_by', 'finance_approved_by_name',
+            'director_approved', 'director_approved_at', 'director_approved_by', 'director_approved_by_name'
         ]
+
+    def get_finance_approved_by_name(self, obj):
+        if obj.finance_approved_by:
+            emp = getattr(obj.finance_approved_by, 'employee_profile', None)
+            if emp:
+                return f"{emp.first_name} {emp.last_name}"
+            return obj.finance_approved_by.username
+        return None
+
+    def get_director_approved_by_name(self, obj):
+        if obj.director_approved_by:
+            emp = getattr(obj.director_approved_by, 'employee_profile', None)
+            if emp:
+                return f"{emp.first_name} {emp.last_name}"
+            return obj.director_approved_by.username
+        return None
 
 class PayslipSerializer(serializers.ModelSerializer):
     employee_detail = EmployeeSerializer(source='employee', read_only=True)

@@ -7,12 +7,14 @@ from .views import (
     GlobalNewsSearchView,
     GlobalPostSearchView,
     GlobalUserSearchView,
+    PayslipSearchView,
 )
 
 urlpatterns = [
     path("jobs/", JobSearchView.as_view(), name="search-jobs"),
     path("jobs/dashboard/", DashboardJobSearchView.as_view(), name="search-jobs-dashboard"),
     path("applications/", ApplicationSearchView.as_view(), name="search-applications"),
+    path("payslips/", PayslipSearchView.as_view(), name="search-payslips"),
     path("global/", GlobalSearchView.as_view(), name="global-search"),
     path("global/news/", GlobalNewsSearchView.as_view(), name="global-search-news"),
     path("global/posts/", GlobalPostSearchView.as_view(), name="global-search-posts"),

@@ -174,6 +174,30 @@ class LeaveBalanceViewSet(viewsets.ReadOnlyModelViewSet):
         # Standard employee sees only their own
         employee = getattr(user, "employee_profile", None)
         if employee:
+            # Dynamically auto-seed default balances for the current year if none exist
+            from django.utils import timezone
+            from django.db.models import Q
+            current_year = timezone.now().year
+            existing = LeaveBalance.objects.filter(employee=employee, year=current_year)
+            if not existing.exists():
+                q_filter = Q(startup=employee.startup) if employee.startup else Q()
+                if employee.organization:
+                    q_filter |= Q(organization=employee.organization)
+                if employee.organization and employee.organization.company:
+                    q_filter |= Q(company=employee.organization.company)
+                q_filter |= Q(startup=None, organization=None, company=None)
+                
+                leave_types = LeaveType.objects.filter(q_filter)
+                for lt in leave_types:
+                    LeaveBalance.objects.get_or_create(
+                        employee=employee,
+                        leave_type=lt,
+                        year=current_year,
+                        defaults={
+                            'total_days': lt.max_days_per_year or 0.0,
+                            'used_days': 0.0
+                        }
+                    )
             return self.queryset.filter(employee=employee)
 
         startup = user.startups.first()

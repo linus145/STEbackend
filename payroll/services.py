@@ -255,8 +255,10 @@ class PayrollApprovalService:
         # Load and lock the payroll object using select_for_update()
         payroll = Payroll.objects.select_for_update().get(id=payroll_id)
 
-        if payroll.status != 'PROCESSED':
-            raise ValueError("Only processed payrolls can be approved.")
+        if payroll.status == 'APPROVED':
+            pass
+        elif payroll.status != 'PROCESSED':
+            raise ValueError(f"Only processed payrolls can be approved. Current status is: {payroll.status}")
 
         from django.contrib.auth import get_user_model
         User = get_user_model()
@@ -292,8 +294,10 @@ class PayrollApprovalService:
         # Load and lock the payroll object using select_for_update()
         payroll = Payroll.objects.select_for_update().get(id=payroll_id)
 
-        if payroll.status != 'PROCESSED':
-            raise ValueError("Only processed payrolls can be rejected.")
+        if payroll.status == 'REJECTED':
+            pass
+        elif payroll.status != 'PROCESSED':
+            raise ValueError(f"Only processed payrolls can be rejected. Current status is: {payroll.status}")
 
         payroll.status = 'REJECTED'
         payroll.save()
@@ -304,49 +308,465 @@ class PayrollApprovalService:
 
 class PayslipGenerationService:
     """
-    Generates dynamic reports and payslips. Safe-guarded against ReportLab installation issues.
+    Generates enterprise-grade PDF payslips branded per-organization.
+    Falls back to plain text if ReportLab is unavailable.
     """
+
+    CURRENCY_SYMBOLS = {
+        'INR': '\u20b9',   # ₹
+        'USD': '$',
+        'EUR': '\u20ac',   # €
+        'GBP': '\u00a3',   # £
+        'JPY': '\u00a5',   # ¥
+        'AUD': 'A$',
+        'CAD': 'C$',
+    }
+
+    @staticmethod
+    def _get_currency_symbol(payslip):
+        """
+        Reads the currency code from PayrollSetting for the startup
+        and returns the matching symbol.  Defaults to ₹ (INR).
+        """
+        startup = payslip.employee.startup or payslip.payroll.startup
+        if startup:
+            try:
+                setting = PayrollSetting.objects.filter(startup=startup).first()
+                if setting and setting.currency:
+                    return PayslipGenerationService.CURRENCY_SYMBOLS.get(
+                        setting.currency.upper(),
+                        setting.currency  # fallback: show the raw code
+                    )
+            except Exception:
+                pass
+        return '\u20b9'  # default ₹
+
+    @staticmethod
+    def _get_org_context(payslip):
+        """
+        Resolves the organisation / startup details for branding.
+        Returns a dict with keys: company_name, address, tax_id, website.
+        """
+        org = getattr(payslip.employee, 'organization', None)
+        startup = payslip.employee.startup or payslip.payroll.startup
+
+        if org:
+            return {
+                'company_name': org.name or (startup.name if startup else 'Your Company'),
+                'address': org.address or '',
+                'tax_id': getattr(org, 'tax_id', '') or '',
+                'website': org.website or (startup.website_url if startup else ''),
+            }
+
+        return {
+            'company_name': startup.name if startup else 'Your Company',
+            'address': '',
+            'tax_id': '',
+            'website': startup.website_url if startup else '',
+        }
+
+    @staticmethod
+    def _month_name(month_number):
+        """Convert month integer to human-readable name."""
+        import calendar
+        try:
+            return calendar.month_name[int(month_number)]
+        except (ValueError, IndexError):
+            return str(month_number)
+
     @staticmethod
     def async_generate_payslip_pdf(payslip):
         """
-        Generates a premium HTML/Text styled payslip or high-fidelity ReportLab PDF if library is present.
+        Generates a premium organisation-branded ReportLab PDF.
+        Falls back to plain-text if ReportLab is missing or fails.
         """
-        # Save a virtual placeholder file which serves as an elegant downloadable payslip
+        from io import BytesIO
+        from django.core.files.base import ContentFile
+
+        ctx = PayslipGenerationService._get_org_context(payslip)
+        cur = PayslipGenerationService._get_currency_symbol(payslip)
+        month_name = PayslipGenerationService._month_name(payslip.payroll.month)
+        pay_period = f"{month_name} {payslip.payroll.year}"
+
         try:
-            from io import BytesIO
-            from django.core.files.base import ContentFile
-            
-            # Simple elegant Text receipt mock to prevent any library exceptions
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.units import mm
+            from reportlab.platypus import (
+                SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+            )
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib import colors
+            from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+
+            BRAND = colors.HexColor('#0f766e')
+            DARK  = colors.HexColor('#1e293b')
+            GRAY  = colors.HexColor('#475569')
+            LIGHT = colors.HexColor('#f1f5f9')
+            BG    = colors.HexColor('#f8fafc')
+
             buffer = BytesIO()
-            content = f"""
-========================================================================
-                      B2Linq ENTERPRISE PAYSLIP
-========================================================================
-MONTH/YEAR: {payslip.payroll.month}/{payslip.payroll.year}
-EMPLOYEE: {payslip.employee.first_name} {payslip.employee.last_name}
-DESIGNATION: {payslip.employee.designation or 'Team Member'}
-DEPARTMENT: {payslip.employee.department or 'Engineering'}
-------------------------------------------------------------------------
-EARNINGS BREAKDOWN:
-Basic Salary:       ${payslip.basic_salary:.2f}
-Total Allowances:   ${payslip.total_allowances:.2f}
-------------------------------------------------------------------------
-DEDUCTIONS BREAKDOWN:
-Total Deductions:   ${payslip.total_deductions:.2f}
-------------------------------------------------------------------------
-NET PAYOUT AMOUNT:  ${payslip.net_salary:.2f}
-========================================================================
-        Thank you for your valuable contribution to the team!
-========================================================================
-            """
-            buffer.write(content.encode('utf-8'))
-            buffer.seek(0)
+            doc = SimpleDocTemplate(
+                buffer, pagesize=A4,
+                leftMargin=20*mm, rightMargin=20*mm,
+                topMargin=18*mm, bottomMargin=18*mm,
+            )
+            styles = getSampleStyleSheet()
+            story = []
+
+            # ── Custom paragraph styles ──────────────────────────────────
+            company_name_style = ParagraphStyle(
+                'CompanyName', parent=styles['Heading1'],
+                fontName='Helvetica-Bold', fontSize=18, leading=22,
+                textColor=BRAND, alignment=TA_LEFT,
+            )
+            subtitle_style = ParagraphStyle(
+                'Subtitle', parent=styles['Normal'],
+                fontName='Helvetica', fontSize=9, leading=12,
+                textColor=GRAY, alignment=TA_LEFT,
+            )
+            doc_title_style = ParagraphStyle(
+                'DocTitle', parent=styles['Heading2'],
+                fontName='Helvetica-Bold', fontSize=14, leading=18,
+                textColor=DARK, alignment=TA_CENTER,
+                spaceBefore=6, spaceAfter=4,
+            )
+            section_style = ParagraphStyle(
+                'SectionHead', parent=styles['Heading3'],
+                fontName='Helvetica-Bold', fontSize=11, leading=15,
+                textColor=DARK, spaceBefore=8, spaceAfter=4,
+            )
+            label_style = ParagraphStyle(
+                'Label', parent=styles['Normal'],
+                fontName='Helvetica-Bold', fontSize=9, leading=13,
+                textColor=DARK,
+            )
+            value_style = ParagraphStyle(
+                'Value', parent=styles['Normal'],
+                fontName='Helvetica', fontSize=9, leading=13,
+                textColor=GRAY,
+            )
+            table_header_style = ParagraphStyle(
+                'THead', parent=styles['Normal'],
+                fontName='Helvetica-Bold', fontSize=9, leading=13,
+                textColor=colors.white,
+            )
+            table_header_right = ParagraphStyle(
+                'THeadR', parent=table_header_style, alignment=TA_RIGHT,
+            )
+            cell_style = ParagraphStyle(
+                'TCell', parent=styles['Normal'],
+                fontName='Helvetica', fontSize=9, leading=13,
+                textColor=GRAY,
+            )
+            cell_right = ParagraphStyle(
+                'TCellR', parent=cell_style, alignment=TA_RIGHT,
+            )
+            cell_bold = ParagraphStyle(
+                'TCellB', parent=cell_style,
+                fontName='Helvetica-Bold', textColor=DARK,
+            )
+            cell_bold_right = ParagraphStyle(
+                'TCellBR', parent=cell_bold, alignment=TA_RIGHT,
+            )
+            footer_style = ParagraphStyle(
+                'Footer', parent=styles['Normal'],
+                fontName='Helvetica-Oblique', fontSize=8, leading=11,
+                textColor=GRAY, alignment=TA_CENTER,
+            )
+
+            # ═══════════════════════════════════════════════════════════════
+            # COMPANY HEADER
+            # ═══════════════════════════════════════════════════════════════
+            story.append(Paragraph(ctx['company_name'], company_name_style))
+
+            sub_parts = []
+            if ctx['address']:
+                sub_parts.append(ctx['address'].replace('\n', ', '))
+            if ctx['tax_id']:
+                sub_parts.append(f"Tax ID: {ctx['tax_id']}")
+            if ctx['website']:
+                sub_parts.append(ctx['website'])
+            if sub_parts:
+                story.append(Paragraph(' &nbsp;|&nbsp; '.join(sub_parts), subtitle_style))
+
+            story.append(Spacer(1, 4))
+            story.append(HRFlowable(
+                width="100%", thickness=1.5, color=BRAND,
+                spaceAfter=10, spaceBefore=4,
+            ))
+
+            # ═══════════════════════════════════════════════════════════════
+            # DOCUMENT TITLE
+            # ═══════════════════════════════════════════════════════════════
+            story.append(Paragraph(f"PAYSLIP &mdash; {pay_period}", doc_title_style))
+            story.append(Spacer(1, 10))
+
+            # ═══════════════════════════════════════════════════════════════
+            # EMPLOYEE INFORMATION
+            # ═══════════════════════════════════════════════════════════════
+            story.append(Paragraph("Employee Information", section_style))
+
+            emp = payslip.employee
+            designation_text = str(emp.designation) if emp.designation else 'N/A'
+            department_text  = str(emp.department) if emp.department else 'N/A'
+
+            info_data = [
+                [
+                    Paragraph("Employee Name", label_style),
+                    Paragraph(f"{emp.first_name} {emp.last_name}", value_style),
+                    Paragraph("Employee ID", label_style),
+                    Paragraph(emp.employee_id or 'N/A', value_style),
+                ],
+                [
+                    Paragraph("Designation", label_style),
+                    Paragraph(designation_text, value_style),
+                    Paragraph("Department", label_style),
+                    Paragraph(department_text, value_style),
+                ],
+                [
+                    Paragraph("Pay Period", label_style),
+                    Paragraph(pay_period, value_style),
+                    Paragraph("Date of Joining", label_style),
+                    Paragraph(
+                        emp.joining_date.strftime('%d %b %Y') if emp.joining_date else 'N/A',
+                        value_style,
+                    ),
+                ],
+                [
+                    Paragraph("Email Address", label_style),
+                    Paragraph(emp.email or 'N/A', value_style),
+                    Paragraph("", label_style),
+                    Paragraph("", value_style),
+                ],
+            ]
+            col_w = [90, 160, 90, 160]
+            info_table = Table(info_data, colWidths=col_w)
+            info_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.4, LIGHT),
+            ]))
+            story.append(info_table)
+            story.append(Spacer(1, 14))
+
+            # ═══════════════════════════════════════════════════════════════
+            # EARNINGS & DEDUCTIONS
+            # ═══════════════════════════════════════════════════════════════
+            story.append(Paragraph("Earnings &amp; Deductions", section_style))
+
+            record = payslip.payroll_record
+            tax_amt = record.tax_amount if record else Decimal('0.00')
+            leave_ded = record.leave_deduction if record else Decimal('0.00')
             
+            # Split PF & ESI from record.pf_amount dynamically using the ratios
+            pf_calc = Decimal('0.00')
+            esi_calc = Decimal('0.00')
+            if record and record.pf_amount > 0:
+                structure = getattr(emp, 'salary_structure', None)
+                if structure:
+                    pf_calc = (payslip.basic_salary * (structure.pf_percentage / Decimal('100.00'))).quantize(Decimal('0.01'))
+                    esi_calc = record.pf_amount - pf_calc
+                    if esi_calc < 0:
+                        esi_calc = Decimal('0.00')
+                        pf_calc = record.pf_amount
+                else:
+                    pf_calc = (record.pf_amount * Decimal('12.00') / Decimal('13.75')).quantize(Decimal('0.01'))
+                    esi_calc = record.pf_amount - pf_calc
+
+            other_ded = (record.deductions - (tax_amt + (record.pf_amount if record else Decimal('0.00')) + leave_ded)) if record else Decimal('0.00')
+            if other_ded < 0:
+                other_ded = Decimal('0.00')
+
+            # Calculate HRA and special allowances from SalaryStructure
+            structure = getattr(emp, 'salary_structure', None)
+            hra_val = structure.hra if structure else Decimal('0.00')
+            
+            special_allowances = payslip.total_allowances - hra_val
+            if record:
+                special_allowances -= (record.overtime_amount + record.reimbursement_amount + record.bonus_amount)
+            if special_allowances < 0:
+                special_allowances = Decimal('0.00')
+
+            # Build detailed earnings & deductions data
+            pay_data = [
+                [Paragraph("Component", table_header_style), Paragraph("Amount", table_header_right)],
+                [Paragraph("Basic Salary", cell_style), Paragraph(f"{cur}{payslip.basic_salary:,.2f}", cell_right)],
+            ]
+
+            if hra_val > 0:
+                pay_data.append([
+                    Paragraph("House Rent Allowance (HRA)", cell_style),
+                    Paragraph(f"{cur}{hra_val:,.2f}", cell_right)
+                ])
+
+            if special_allowances > 0:
+                pay_data.append([
+                    Paragraph("Special/Other Allowances", cell_style),
+                    Paragraph(f"{cur}{special_allowances:,.2f}", cell_right)
+                ])
+
+            if record and record.overtime_amount > 0:
+                pay_data.append([
+                    Paragraph("Overtime Pay", cell_style),
+                    Paragraph(f"{cur}{record.overtime_amount:,.2f}", cell_right)
+                ])
+
+            if record and record.reimbursement_amount > 0:
+                pay_data.append([
+                    Paragraph("Reimbursements", cell_style),
+                    Paragraph(f"{cur}{record.reimbursement_amount:,.2f}", cell_right)
+                ])
+
+            if record and record.bonus_amount > 0:
+                pay_data.append([
+                    Paragraph("Bonus / Incentives", cell_style),
+                    Paragraph(f"{cur}{record.bonus_amount:,.2f}", cell_right)
+                ])
+
+            # Deductions
+            if tax_amt > 0:
+                pay_data.append([
+                    Paragraph("Income Tax (TDS)", cell_style),
+                    Paragraph(f"&minus; {cur}{tax_amt:,.2f}", cell_right)
+                ])
+
+            if pf_calc > 0:
+                pay_data.append([
+                    Paragraph("Provident Fund (PF)", cell_style),
+                    Paragraph(f"&minus; {cur}{pf_calc:,.2f}", cell_right)
+                ])
+
+            if esi_calc > 0:
+                pay_data.append([
+                    Paragraph("Employee State Insurance (ESI)", cell_style),
+                    Paragraph(f"&minus; {cur}{esi_calc:,.2f}", cell_right)
+                ])
+
+            if leave_ded > 0:
+                pay_data.append([
+                    Paragraph("Absence / LOP Deductions", cell_style),
+                    Paragraph(f"&minus; {cur}{leave_ded:,.2f}", cell_right)
+                ])
+
+            if other_ded > 0:
+                pay_data.append([
+                    Paragraph("Other Deductions", cell_style),
+                    Paragraph(f"&minus; {cur}{other_ded:,.2f}", cell_right)
+                ])
+
+            # Net pay row
+            pay_data.append([
+                Paragraph("Net Pay", cell_bold),
+                Paragraph(f"{cur}{payslip.net_salary:,.2f}", cell_bold_right),
+            ])
+
+            pay_table = Table(pay_data, colWidths=[340, 160])
+            pay_table.setStyle(TableStyle([
+                # Header row
+                ('BACKGROUND', (0, 0), (-1, 0), BRAND),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 7),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+                # Zebra striping alternate backgrounds
+                ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, BG]),
+                # Net-pay highlight
+                ('BACKGROUND', (0, -1), (-1, -1), LIGHT),
+                ('LINEABOVE', (0, -1), (-1, -1), 1.2, BRAND),
+                # Subtle row borders
+                ('LINEBELOW', (0, 0), (-1, -2), 0.4, LIGHT),
+            ]))
+            story.append(pay_table)
+            story.append(Spacer(1, 20))
+
+            # ═══════════════════════════════════════════════════════════════
+            # FOOTER
+            # ═══════════════════════════════════════════════════════════════
+            story.append(HRFlowable(
+                width="100%", thickness=0.5, color=LIGHT,
+                spaceAfter=8, spaceBefore=4,
+            ))
+            story.append(Paragraph(
+                "This is a system-generated payslip and does not require a signature.",
+                footer_style,
+            ))
+            story.append(Paragraph(
+                f"&copy; {payslip.payroll.year} {ctx['company_name']}. All rights reserved.",
+                footer_style,
+            ))
+
+            # ── Build PDF ─────────────────────────────────────────────────
+            doc.build(story)
+            buffer.seek(0)
+
             payslip.pdf_file.save(
-                f"payslip_{payslip.employee.id}_{payslip.payroll.year}_{payslip.payroll.month}.txt",
-                ContentFile(buffer.getvalue())
+                f"payslip_{emp.id}_{payslip.payroll.year}_{payslip.payroll.month}.pdf",
+                ContentFile(buffer.getvalue()),
             )
             payslip.save()
+
         except Exception as e:
-            print(f"Error generating payslip file: {e}")
-            pass
+            # ── Fallback: plain-text payslip ──────────────────────────────
+            print(f"ReportLab PDF generation failed ({e}), falling back to text.")
+            try:
+                designation_text = str(payslip.employee.designation) if payslip.employee.designation else 'N/A'
+                department_text  = str(payslip.employee.department) if payslip.employee.department else 'N/A'
+                buffer = BytesIO()
+                
+                earnings_str = f"  Basic Salary       {cur}{payslip.basic_salary:,.2f}\n"
+                if hra_val > 0:
+                    earnings_str += f"  HRA                {cur}{hra_val:,.2f}\n"
+                if special_allowances > 0:
+                    earnings_str += f"  Other Allowances   {cur}{special_allowances:,.2f}\n"
+                if record and record.overtime_amount > 0:
+                    earnings_str += f"  Overtime Pay       {cur}{record.overtime_amount:,.2f}\n"
+                if record and record.reimbursement_amount > 0:
+                    earnings_str += f"  Reimbursements     {cur}{record.reimbursement_amount:,.2f}\n"
+                if record and record.bonus_amount > 0:
+                    earnings_str += f"  Bonus/Incentive    {cur}{record.bonus_amount:,.2f}\n"
+
+                deductions_str = ""
+                if tax_amt > 0:
+                    deductions_str += f"  Income Tax (TDS)   {cur}{tax_amt:,.2f}\n"
+                if pf_calc > 0:
+                    deductions_str += f"  Provident Fund     {cur}{pf_calc:,.2f}\n"
+                if esi_calc > 0:
+                    deductions_str += f"  ESI                {cur}{esi_calc:,.2f}\n"
+                if leave_ded > 0:
+                    deductions_str += f"  Absence Deductions {cur}{leave_ded:,.2f}\n"
+                if other_ded > 0:
+                    deductions_str += f"  Other Deductions   {cur}{other_ded:,.2f}\n"
+
+                content = f"""========================================================================
+            {ctx['company_name'].upper()} — PAYSLIP
+========================================================================
+Pay Period : {pay_period}
+Employee   : {payslip.employee.first_name} {payslip.employee.last_name}
+Employee ID: {payslip.employee.employee_id or 'N/A'}
+Designation: {designation_text}
+Department : {department_text}
+------------------------------------------------------------------------
+EARNINGS:
+{earnings_str}------------------------------------------------------------------------
+DEDUCTIONS:
+{deductions_str}  Total Deductions   {cur}{payslip.total_deductions:,.2f}
+------------------------------------------------------------------------
+NET PAY              {cur}{payslip.net_salary:,.2f}
+========================================================================
+This is a system-generated payslip. No signature required.
+(c) {payslip.payroll.year} {ctx['company_name']}
+========================================================================
+"""
+                buffer.write(content.encode('utf-8'))
+                buffer.seek(0)
+
+                payslip.pdf_file.save(
+                    f"payslip_{payslip.employee.id}_{payslip.payroll.year}_{payslip.payroll.month}.txt",
+                    ContentFile(buffer.getvalue()),
+                )
+                payslip.save()
+            except Exception as ex:
+                print(f"Error generating fallback payslip file: {ex}")
+
