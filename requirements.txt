@@ -74,12 +74,14 @@ pyee==13.0.1
 PyJWT==2.12.1
 pyOpenSSL==26.0.0
 pyparsing==3.3.2
+pypdf==6.12.2
 pypdfium2==5.7.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 PyYAML==6.0.3
 redis==5.0.1
 referencing==0.37.0
+reportlab==4.5.1
 requests==2.33.1
 rpds-py==0.30.0
 service-identity==24.2.0
