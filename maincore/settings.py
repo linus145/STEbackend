@@ -99,6 +99,7 @@ INSTALLED_APPS = [
     "news",
     "seo",
     "publicpages",
+    "analytics",
     
     #AI
     "AI",

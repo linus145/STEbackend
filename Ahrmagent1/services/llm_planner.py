@@ -119,6 +119,7 @@ B. HR SUITE (SPA with Tabbed Navigation)
   - "nav-tab-hr-onboarding" → Lifecycle onboarding, employee check-in queues, and onboarding tasks. Contains the "Move back to Interview Pipeline" button (`onboarding-move-back-btn`) to send a candidate back to recruitment/interview pipeline. If the user asks to move/make an onboarded/onboarding employee back to the interview or recruitment stage/section, navigate to this tab first and click the "Move back to Interview Pipeline" button next to that employee. Do NOT navigate to the Recruiter Suite's /recruiter/AIInterviews page.
   - "nav-tab-hr-employees" → Employee directory, profiles, salary updates, and detail lookups. Note: This tab does NOT contain the "Move back to Interview Pipeline" button; it only exists on the onboarding tab.
   - Collapsible Navigation Groups:
+    - *COLLAPSIBLE GROUPS NAVIGATION RULE (MANDATORY)*: If the target sub-menu tab (e.g., "nav-tab-hr-sub-payroll-approvals") is not visible in the current Page State, the menu is collapsed. You MUST first click the parent group button (e.g., "nav-parent-payroll") to expand it and reveal the sub-menu items, then click the target sub-menu tab. Do NOT navigate blindly.
     - "nav-parent-attendance" → Attendance section parent button. Click to expand sub-menu tabs:
       - "nav-tab-hr-sub-attendance-activity" → Live activity feed. Shows records list with delete action button: `attendance-delete-btn-{record.id}`.
       - "nav-tab-hr-sub-attendance-requests" → Attendance Correction Requests. Row action buttons: `attendance-correction-approve-btn-{req.id}` and `attendance-correction-reject-btn-{req.id}`.
@@ -148,11 +149,17 @@ B. HR SUITE (SPA with Tabbed Navigation)
           - `payroll-new-run-year-select` → Dropdown select for year. Set value to "2026" (or text "2026") to run payroll for 2026.
           - `payroll-new-run-compile-btn` → Click this button to compile and generate payroll runs.
           - Once clicked, wait 2000ms.
-        - Rows have action buttons: `payroll-rerun-btn-{run.id}`, `payroll-delete-btn-{run.id}`, and `payroll-review-sheet-btn-{run.id}`.
-        - Drilldown view actions: `payroll-back-to-logs-btn` (back), `payroll-drilldown-rerun-btn-{run.id}` (recalculate).
+        - Rows have action buttons which are sequentially indexed (e.g. `payroll-review-sheet-btn` for the first row, `payroll-review-sheet-btn-1` for the second row, etc.):
+          - `payroll-review-sheet-btn` (Review sheet of the first run row)
+          - `payroll-rerun-btn` (Rerun of the first run row)
+          - `payroll-delete-btn` (Delete of the first run row)
+          - For subsequent rows, append `-N` where N is the row index (e.g. `payroll-review-sheet-btn-1`, `payroll-review-sheet-btn-2`, etc.).
+        - Drilldown view actions: `payroll-back-to-logs-btn` (back), `payroll-drilldown-rerun-btn` (recalculate).
       - "nav-tab-hr-sub-payroll-approvals" → Executive queue.
-        - Row actions: `payroll-approvals-review-sheet-btn-{run.id}`.
-        - Drilldown actions: `payroll-approvals-back-btn` (back), `payroll-run-approve-btn-{run.id}` (Approve & issue payslips), `payroll-run-reject-btn-{run.id}` (Reject run).
+        - Rows have action buttons which are sequentially indexed:
+          - `payroll-approvals-review-sheet-btn` (Review sheet of the first approval row)
+          - For subsequent rows, append `-N` where N is the row index (e.g. `payroll-approvals-review-sheet-btn-1`, `payroll-approvals-review-sheet-btn-2`, etc.).
+        - Drilldown actions: `payroll-approvals-back-btn` (back), `payroll-run-approve-btn` (Approve & issue payslips), `payroll-run-reject-btn` (Reject run).
       - "nav-tab-hr-sub-payroll-salary-structures" → Compensation profiles list.
         - Click `"payroll-salary-add-btn"` to add profile, or `"payroll-salary-edit-btn-{profile.id}"` to modify.
         - Form inputs: `payroll-salary-employee-id-input`, `payroll-salary-basic-salary-input`, `payroll-salary-hra-input`, `payroll-salary-ot-rate-input`, `payroll-salary-tax-percentage-input`, `payroll-salary-pf-percentage-input`, `payroll-salary-esi-percentage-input`.
@@ -345,6 +352,13 @@ When you are on the Architecture step (Step 2), the `existing_rounds` field in t
    - Use `ask_user` to present choices. Do not run in infinite loops.
 7. **Wait times**: Navigation: 2000ms | AI Generation: 8000ms | Dispatch: 3000ms | Sync: 2500ms.
 8. **Anti-Loop**: If an action fails twice, do NOT repeat it. "ask_user" for help.
+9. **Task Already Completed Detection (CRITICAL)**:
+   - If the user asks you to perform a task (e.g., "Approve leave requests", "Process pending leaves", "Verify reimbursement claims", etc.), and after navigating to the target tab/page you observe that no items, pending requests, or records exist (e.g., no pending leaves are shown in the list, or the list text says "No pending leave requests found"), this means the task is already completed.
+   - Under this condition, you MUST NOT fail or get stuck. Instead, immediately output the `ask_user` action.
+   - The question you ask in `"value"` should inform the user that no pending items were found on the page to process, and ask if they want to confirm the task status.
+   - **MANDATORY**: You MUST include the exact options list: `["Task Completed", "Task Incompleted"]` in the `"options"` field of the JSON action.
+   - If the user selects/replies with `"Task Completed"`, you MUST output the `"done"` action to finish the execution.
+   - If the user selects/replies with `"Task Incompleted"`, you MUST output a helpful question or action to clarify what they would like you to do next.
 """
 
 
@@ -386,6 +400,30 @@ class LLMVisionPlanner:
         Returns:
             Dict with action details: {action_type, selector, value, wait_after_ms, description, thinking}
         """
+        # Deterministic shortcut: if the user selected "Task Completed" or "Task Incompleted"
+        # from the ask_user options, we can resolve immediately without an LLM call.
+        if user_response:
+            resp_lower = user_response.strip().lower()
+            if "task completed" in resp_lower:
+                return {
+                    "thinking": "The user confirmed that the task is already completed. Ending execution.",
+                    "action_type": "done",
+                    "selector": "",
+                    "value": "Task completed successfully.",
+                    "wait_after_ms": 1000,
+                    "description": "Goal marked as completed by user."
+                }
+            elif "task incompleted" in resp_lower:
+                return {
+                    "thinking": "The user indicated that the task is incomplete. Asking user for next steps.",
+                    "action_type": "ask_user",
+                    "selector": "",
+                    "value": "The task was marked as incomplete. What would you like me to do next?",
+                    "options": [],
+                    "wait_after_ms": 1000,
+                    "description": "Task is incomplete. Prompting user for next steps."
+                }
+
         history_text = ""
         if action_history:
             recent = action_history[-10:]

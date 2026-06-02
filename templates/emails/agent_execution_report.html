@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>STE AI Agent Execution Report</title>
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.6;
+      color: #1e293b;
+      margin: 0;
+      padding: 0;
+      background-color: #f8fafc;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background-color: #ffffff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+      border: 1px solid #e2e8f0;
+    }
+
+    .header {
+      background-color: #0f172a;
+      color: #ffffff;
+      padding: 32px 24px;
+      text-align: center;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.025em;
+      text-transform: uppercase;
+    }
+
+    .header p {
+      margin: 8px 0 0 0;
+      font-size: 13px;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+
+    .content {
+      padding: 32px 24px;
+    }
+
+    .meta-grid {
+      margin-bottom: 28px;
+      background-color: #f1f5f9;
+      padding: 16px;
+      border-radius: 6px;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .meta-row:last-child {
+      border-bottom: none;
+    }
+
+    .meta-label {
+      font-weight: 700;
+      color: #64748b;
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.05em;
+    }
+
+    .meta-value {
+      font-weight: 600;
+      color: #0f172a;
+      font-size: 12px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 800;
+      color: #ffffff;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .status-badge.success {
+      background-color: #10b981;
+    }
+
+    .status-badge.failed {
+      background-color: #ef4444;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 8px;
+      margin-top: 28px;
+      margin-bottom: 16px;
+    }
+
+    .action-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 14px;
+      margin-bottom: 12px;
+      background-color: #f8fafc;
+    }
+
+    .action-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #0a66c2;
+      margin-bottom: 6px;
+    }
+
+    .action-result {
+      font-size: 12px;
+      color: #334155;
+      margin: 0;
+      font-weight: 550;
+    }
+
+    .error-box {
+      background-color: #fef2f2;
+      border: 1px dashed #fca5a5;
+      color: #991b1b;
+      padding: 16px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .footer {
+      background-color: #f8fafc;
+      padding: 24px;
+      text-align: center;
+      border-top: 1px solid #e2e8f0;
+      font-size: 11px;
+      color: #64748b;
+      font-weight: 550;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{ task_name|default:"STE Autonomous Execution Report" }}</h1>
+      <div style="margin-top: 10px;">
+        <span class="status-badge {{ status_text|lower }}" style="padding: 4px 12px; font-size: 11px; border-radius: 6px;">
+          {{ status_text }}
+        </span>
+      </div>
+      <p>Tenant: {{ tenant_name }}</p>
+    </div>
+    <div class="content">
+      <div class="meta-grid">
+        <div class="meta-row">
+          <div class="meta-label">Execution Status</div>
+          <div class="meta-value">
+            <span class="status-badge {{ status_text|lower }}">
+              {{ status_text }}
+            </span>
+          </div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-label">Trigger Time</div>
+          <div class="meta-value">{{ formatted_trigger_time }}</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-label">Recurrence</div>
+          <div class="meta-value">{{ schedule.recurrence|upper }}</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-label">Duration</div>
+          <div class="meta-value">{{ execution.execution_time|floatformat:2 }}s</div>
+        </div>
+      </div>
+
+      {% if execution.status == "failed" %}
+      <div class="section-title">Execution Failure Details</div>
+      <div class="error-box">
+        {{ error_message|default:"An unexpected error occurred during scheduling pipeline execution." }}
+      </div>
+      {% else %}
+      <div class="section-title">Executed Tasks & Actions</div>
+      {% for act in actions_performed %}
+      <div class="action-card">
+        <div class="action-title">{{ act.action }}</div>
+        <p class="action-result">{{ act.result }}</p>
+      </div>
+      {% empty %}
+      <p style="font-size: 12px; color: #64748b; font-style: italic;">No specific actions recorded.</p>
+      {% endfor %}
+      {% endif %}
+    </div>
+    <div class="footer">
+      This is an automated system notification from your STE Autonomous Agent engine.<br>
+      © 2026 STE Smart Tenant Systems. All rights reserved.
+    </div>
+  </div>
+</body>
+
+</html>

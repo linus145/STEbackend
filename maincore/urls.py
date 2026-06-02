@@ -233,6 +233,7 @@ urlpatterns = [
     path("api/subscription/", include("subscription.urls")),
     path("api/seo/", include("seo.urls")),
     path("api/public/", include("publicpages.urls")),
+    path("api/analytics/", include("analytics.urls")),
     
     #AI
     path("api/ai/", include("AI.urls")),

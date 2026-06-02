@@ -180,12 +180,45 @@ class AgentExecutionListView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request):
-        executions = AgentExecution.objects.all().order_by('-started_at')
+        if request.user and request.user.is_authenticated:
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            organization = None
+            if company:
+                from organization.models import Organization
+                organization = Organization.objects.filter(company=company).first()
+            
+            from django.db.models import Q
+            q_filter = Q()
+            if organization is not None or startup is not None:
+                if organization is not None:
+                    q_filter |= Q(organization=organization)
+                if startup is not None:
+                    q_filter |= Q(startup=startup)
+            else:
+                q_filter = Q(organization__isnull=True, startup__isnull=True)
+            
+            executions = AgentExecution.objects.filter(q_filter).order_by('-started_at')
+        else:
+            executions = AgentExecution.objects.all().order_by('-started_at')
         serializer = AgentExecutionSerializer(executions, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        serializer = AgentExecutionSerializer(data=request.data)
+        data = request.data.copy()
+        if request.user and request.user.is_authenticated:
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            if company:
+                from organization.models import Organization
+                organization, _ = Organization.objects.get_or_create(
+                    company=company,
+                    defaults={"name": company.company_name}
+                )
+                data['organization'] = organization.id
+            if startup:
+                data['startup'] = startup.id
+        serializer = AgentExecutionSerializer(data=data)
         if serializer.is_valid():
             execution = serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -230,3 +263,274 @@ class AgentChatHistoryClearView(APIView):
         else:
             AgentChatHistory.objects.all().delete()
         return Response({"status": "success", "message": "Chat history cleared."})
+
+
+from Ahrmagent1.models import AgentGoal, AgentMemory, AgentDecision, AgentAction, AgentSchedule, AgentCheckpoint
+from Ahrmagent1.serializers import (
+    AgentGoalSerializer,
+    AgentMemorySerializer,
+    AgentDecisionSerializer,
+    AgentActionSerializer,
+    AgentScheduleSerializer,
+    AgentCheckpointSerializer,
+)
+
+class AgentGoalListView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if request.user and request.user.is_authenticated:
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            organization = None
+            if company:
+                from organization.models import Organization
+                organization = Organization.objects.filter(company=company).first()
+            
+            from django.db.models import Q
+            q_filter = Q()
+            if organization is not None or startup is not None:
+                if organization is not None:
+                    q_filter |= Q(organization=organization)
+                if startup is not None:
+                    q_filter |= Q(startup=startup)
+            else:
+                q_filter = Q(organization__isnull=True, startup__isnull=True)
+            
+            goals = AgentGoal.objects.filter(q_filter).order_by('-created_at')
+        else:
+            goals = AgentGoal.objects.all().order_by('-created_at')
+        serializer = AgentGoalSerializer(goals, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        data = request.data.copy()
+        if request.user and request.user.is_authenticated:
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            if company:
+                from organization.models import Organization
+                organization, _ = Organization.objects.get_or_create(
+                    company=company,
+                    defaults={"name": company.company_name}
+                )
+                data['organization'] = organization.id
+            if startup:
+                data['startup'] = startup.id
+        serializer = AgentGoalSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AgentActiveExecutionView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if request.user and request.user.is_authenticated:
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            organization = None
+            if company:
+                from organization.models import Organization
+                organization = Organization.objects.filter(company=company).first()
+            
+            from django.db.models import Q
+            q_filter = Q()
+            if organization is not None or startup is not None:
+                if organization is not None:
+                    q_filter |= Q(organization=organization)
+                if startup is not None:
+                    q_filter |= Q(startup=startup)
+            else:
+                q_filter = Q(organization__isnull=True, startup__isnull=True)
+            
+            # Stale execution reaper: auto-fail any 'running' or 'pending' execution older than 10 minutes
+            from django.utils import timezone as tz
+            import datetime
+            stale_cutoff = tz.now() - datetime.timedelta(minutes=10)
+            stale_execs = AgentExecution.objects.filter(
+                agent_type='browser_agent',
+                status__in=['pending', 'running'],
+                started_at__lt=stale_cutoff
+            ).filter(q_filter)
+            if stale_execs.exists():
+                stale_execs.update(
+                    status='failed',
+                    completed_at=tz.now()
+                )
+
+            active_exec = AgentExecution.objects.filter(
+                agent_type='browser_agent',
+                status__in=['pending', 'running']
+            ).filter(q_filter).order_by('-started_at').first()
+        else:
+            # Stale execution reaper for unauthenticated requests
+            from django.utils import timezone as tz
+            import datetime
+            stale_cutoff = tz.now() - datetime.timedelta(minutes=10)
+            stale_execs = AgentExecution.objects.filter(
+                agent_type='browser_agent',
+                status__in=['pending', 'running'],
+                started_at__lt=stale_cutoff
+            )
+            if stale_execs.exists():
+                stale_execs.update(
+                    status='failed',
+                    completed_at=tz.now()
+                )
+
+            active_exec = AgentExecution.objects.filter(
+                agent_type='browser_agent',
+                status__in=['pending', 'running']
+            ).order_by('-started_at').first()
+
+        if active_exec:
+            serializer = AgentExecutionSerializer(active_exec)
+            data = serializer.data
+            data['active'] = True
+            return Response(data)
+        
+        return Response({"active": False})
+
+class AgentMemoryView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, execution_id):
+        memories = AgentMemory.objects.filter(execution_id=execution_id).order_by('created_at')
+        serializer = AgentMemorySerializer(memories, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, execution_id):
+        try:
+            execution = AgentExecution.objects.get(pk=execution_id)
+        except AgentExecution.DoesNotExist:
+            return Response({"error": "Execution not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data.copy()
+        data['execution'] = execution_id
+        
+        memory_key = data.get('memory_key')
+        memory_type = data.get('memory_type')
+        if memory_key and memory_type:
+            memory_obj = AgentMemory.objects.filter(
+                execution=execution, 
+                memory_key=memory_key, 
+                memory_type=memory_type
+            ).first()
+            if memory_obj:
+                serializer = AgentMemorySerializer(memory_obj, data=data, partial=True)
+                if serializer.is_valid():
+                    serializer.save()
+                    return Response(serializer.data)
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = AgentMemorySerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AgentDecisionView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, execution_id):
+        try:
+            execution = AgentExecution.objects.get(pk=execution_id)
+        except AgentExecution.DoesNotExist:
+            return Response({"error": "Execution not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data.copy()
+        data['execution'] = execution_id
+        serializer = AgentDecisionSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AgentActionView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, execution_id):
+        try:
+            execution = AgentExecution.objects.get(pk=execution_id)
+        except AgentExecution.DoesNotExist:
+            return Response({"error": "Execution not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data.copy()
+        data['execution'] = execution_id
+        serializer = AgentActionSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AgentCheckpointView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, execution_id):
+        checkpoints = AgentCheckpoint.objects.filter(execution_id=execution_id).order_by('-created_at')
+        serializer = AgentCheckpointSerializer(checkpoints, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, execution_id):
+        try:
+            execution = AgentExecution.objects.get(pk=execution_id)
+        except AgentExecution.DoesNotExist:
+            return Response({"error": "Execution not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data.copy()
+        data['execution'] = execution_id
+        serializer = AgentCheckpointSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class AgentScheduleView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        if request.user and request.user.is_authenticated:
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            organization = None
+            if company:
+                from organization.models import Organization
+                organization = Organization.objects.filter(company=company).first()
+            
+            from django.db.models import Q
+            q_filter = Q()
+            if organization is not None or startup is not None:
+                if organization is not None:
+                    q_filter |= Q(organization=organization)
+                if startup is not None:
+                    q_filter |= Q(startup=startup)
+            else:
+                q_filter = Q(organization__isnull=True, startup__isnull=True)
+            
+            schedules = AgentSchedule.objects.filter(q_filter).order_by('-id')
+        else:
+            schedules = AgentSchedule.objects.all().order_by('-id')
+        serializer = AgentScheduleSerializer(schedules, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        data = request.data.copy()
+        if request.user and request.user.is_authenticated:
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            if company:
+                from organization.models import Organization
+                organization, _ = Organization.objects.get_or_create(
+                    company=company,
+                    defaults={"name": company.company_name}
+                )
+                data['organization'] = organization.id
+            if startup:
+                data['startup'] = startup.id
+        serializer = AgentScheduleSerializer(data=data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
