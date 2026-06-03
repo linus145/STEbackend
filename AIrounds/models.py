@@ -298,3 +298,21 @@ class CandidateInterviewLink(models.Model):
             self.save(update_fields=["status"])
             return False
         return True
+
+
+class InterviewCandidate(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    application = models.OneToOneField(
+        "jobs.JobApplication",
+        on_delete=models.CASCADE,
+        related_name="interview_candidate",
+    )
+    session = models.OneToOneField(
+        "InterviewSession",
+        on_delete=models.CASCADE,
+        related_name="interview_candidate",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"InterviewCandidate: {self.application.applicant.email} for {self.application.job.title}"

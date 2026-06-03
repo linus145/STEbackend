@@ -85,26 +85,27 @@ class AnalyzeResumesView(APIView, ResponseMixin):
             total_scored = all_scored_qs.count()
 
             if total_scored > 0:
+                # Fetch and self-heal mismatching database scores on-the-fly
+                all_scored_list = list(all_scored_qs[:25])
+                for cand in all_scored_list:
+                    summary, analysis_obj = AIService.extract_summary_and_analysis(cand.ai_analysis)
+                    if analysis_obj and isinstance(analysis_obj, dict):
+                        rv_score = analysis_obj.get("recruiter_view", {}).get("match_score")
+                        if rv_score is not None:
+                            try:
+                                parsed_score = int(rv_score)
+                                if parsed_score != cand.ai_score:
+                                    cand.ai_score = parsed_score
+                                    cand.save(update_fields=["ai_score"])
+                            except:
+                                pass
+
+                # Sort by corrected score descending to update priorities/rankings
+                all_scored_list.sort(key=lambda c: c.ai_score or 0, reverse=True)
+
                 results_data = []
-                for rank, cand in enumerate(all_scored_qs[:25], 1):
-                    summary = ""
-                    analysis_obj = None
-                    try:
-                        if cand.ai_analysis and cand.ai_analysis.strip().startswith(
-                            "{"
-                        ):
-                            analysis_obj = json.loads(cand.ai_analysis)
-                            summary = analysis_obj.get("recruiter_view", {}).get(
-                                "explanation", ""
-                            )
-                    except:
-                        pass
-                    if not summary:
-                        summary = (
-                            (cand.ai_analysis[:500] + "...")
-                            if cand.ai_analysis and len(cand.ai_analysis) > 500
-                            else (cand.ai_analysis or "No analysis available.")
-                        )
+                for rank, cand in enumerate(all_scored_list, 1):
+                    summary, analysis_obj = AIService.extract_summary_and_analysis(cand.ai_analysis)
 
                     results_data.append(
                         {
@@ -115,6 +116,34 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                             "score": cand.ai_score,
                             "summary": summary,
                             "analysis": analysis_obj,
+                            "pipeline_disposition": (
+                                analysis_obj.get("recruiter_view", {}).get("pipeline_disposition", "")
+                                if analysis_obj else ""
+                            ),
+                            "knockout_applied": (
+                                analysis_obj.get("recruiter_view", {}).get("knockout_applied", False)
+                                if analysis_obj else False
+                            ),
+                            "knockout_reason": (
+                                analysis_obj.get("recruiter_view", {}).get("knockout_reason", "")
+                                if analysis_obj else ""
+                            ),
+                            "hiring_confidence": (
+                                analysis_obj.get("recruiter_view", {}).get("hiring_confidence", "")
+                                if analysis_obj else ""
+                            ),
+                            "recruiter_action_memo": (
+                                analysis_obj.get("recruiter_view", {}).get("recruiter_action_memo", "")
+                                if analysis_obj else ""
+                            ),
+                            "skills_match_pct": (
+                                analysis_obj.get("intelligence", {}).get("skills_assessment", {}).get("skills_match_percentage", 0)
+                                if analysis_obj else 0
+                            ),
+                            "career_level": (
+                                analysis_obj.get("intelligence", {}).get("career_summary", {}).get("career_level_assessed", "")
+                                if analysis_obj else ""
+                            ),
                         }
                     )
 
@@ -164,7 +193,28 @@ class AnalyzeResumesView(APIView, ResponseMixin):
             existing_report.results["error"] = "Timed out — marked as stale"
             existing_report.save()
 
-        # 3. Create Processing Report
+        # 3. Extract & Validate Model
+        model = request.data.get("model", "gemini-2.5-flash-lite").strip()
+        allowed_models = [
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-live",
+            "gemini-3.0-flash-live",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-thinking-exp",
+            "gemini-2.0-pro-exp",
+            "text-multilingual-embedding-002"
+        ]
+        if model not in allowed_models:
+            model = "gemini-2.5-flash-lite"
+
+        # 4. Create Processing Report
         report = AIScreeningReport.objects.create(
             job_id=job.id,
             job_title=job.title,
@@ -175,6 +225,7 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                 "count": len(applications),
                 "total_applicants": len(applications),
                 "top_candidates": [],
+                "model_used": model,
             },
         )
 
@@ -185,11 +236,11 @@ class AnalyzeResumesView(APIView, ResponseMixin):
             status="REVIEWED"
         )
 
-        # 4. Trigger Celery Task
+        # 5. Trigger Celery Task
         from AI.tasks import process_ai_screening
 
         process_ai_screening.delay(
-            str(job.id), request.user.id, app_ids, str(report.id)
+            str(job.id), request.user.id, app_ids, str(report.id), model=model
         )
 
         return self.build_response(
@@ -223,6 +274,17 @@ class AIPlanChatView(APIView, ResponseMixin):
     def post(self, request):
         user_message = request.data.get("message", "").strip()
         history = request.data.get("history", [])
+        selected_model = request.data.get("model", "gemini-2.5-flash-lite").strip()
+        allowed_models = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro"
+        ]
+        if selected_model not in allowed_models:
+            selected_model = "gemini-2.5-flash-lite"
 
         if not user_message:
             return self.build_response("error", "Message is required.", {}, status.HTTP_400_BAD_REQUEST)
@@ -256,6 +318,26 @@ class AIPlanChatView(APIView, ResponseMixin):
             )
             return self.build_response("success", "Reply generated (Fallback).", {"reply": fallback_text})
 
+        # Dynamic Candidate Context Parsing & Injection
+        candidate_context = request.data.get("candidate_context", None)
+        context_str = ""
+        if candidate_context and isinstance(candidate_context, dict):
+            context_str = (
+                f"You are currently discussing candidate '{candidate_context.get('name')}' for this job position.\n"
+                f"Candidate Screening Metadata:\n"
+                f"- Match/Fit Score: {candidate_context.get('score')}%\n"
+                f"- Summary: {candidate_context.get('summary')}\n"
+            )
+            if candidate_context.get('strengths'):
+                context_str += f"- Strengths: {', '.join(candidate_context.get('strengths'))}\n"
+            if candidate_context.get('concerns'):
+                context_str += f"- Concerns: {', '.join(candidate_context.get('concerns'))}\n"
+            if candidate_context.get('missing_skills'):
+                context_str += f"- Missing required skills: {', '.join(candidate_context.get('missing_skills'))}\n"
+            if candidate_context.get('knockout_reason'):
+                context_str += f"- Knockout details: {candidate_context.get('knockout_reason')}\n"
+            context_str += "\nUse this context when answering the user's questions about this candidate. Keep answers very brief, specific, and professional.\n\n"
+
         try:
             from Ahrmagent1.services.llm_planner import APP_KNOWLEDGE
             client = _get_client(api_key)
@@ -266,11 +348,13 @@ class AIPlanChatView(APIView, ResponseMixin):
                 "You are here to answer questions, explain processes, and describe settings inside this application. "
                 "Here is the knowledge about the application structure, settings, navigation, and workflows:\n"
                 f"{APP_KNOWLEDGE}\n\n"
+                f"{context_str}"
                 "CRITICAL INSTRUCTIONS:\n"
                 "1. Answer questions about the application structure, configurations, settings (such as grace period, attendance, payroll) and workflows using the knowledge above.\n"
-                "2. Do NOT output Playwright actions or structured JSON. Answer naturally in conversational text.\n"
-                "3. Your output must be highly concise, direct, and strictly under 500 characters in total length.\n"
-                "4. Avoid excessively long pleasantries. Be authentic, natural, and extremely brief. Do not exceed 500 characters."
+                "2. If candidate screening context is provided, prioritize answering questions specifically about that candidate's qualifications, fit score, strengths, and weaknesses.\n"
+                "3. Do NOT output Playwright actions or structured JSON. Answer naturally in conversational text.\n"
+                "4. Your output must be highly concise, direct, and strictly under 500 characters in total length.\n"
+                "5. Avoid excessively long pleasantries. Be authentic, natural, and extremely brief. Do not exceed 500 characters."
             )
 
             # Format history
@@ -293,7 +377,7 @@ class AIPlanChatView(APIView, ResponseMixin):
             )
 
             response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model=selected_model,
                 contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,

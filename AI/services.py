@@ -3,6 +3,13 @@ import logging
 import re
 import time
 
+from AI.parsers import (
+    parse_ai_response,
+    extract_summary_and_analysis as _extract_summary_and_analysis,
+    repair_truncated_json as _repair_truncated_json,
+    get_summary_from_dict as _get_summary_from_dict,
+)
+
 import requests
 from django.conf import settings
 from google import genai
@@ -11,11 +18,11 @@ from google.genai import types
 logger = logging.getLogger("ai.service")
 
 # ─── Model Pipeline ───────────────────────────────────────────────────────────
-# Primary: gemini-2.5-flash-lite  — fastest, highest free-tier quota
-# Fallback: gemini-2.5-flash      — more reasoning capacity
+# Primary: gemini-2.5-flash      — more reasoning capacity
+# Fallback: gemini-2.5-flash-lite  — fastest, highest free-tier quota
 MODEL_PIPELINE = [
-    ("gemini-2.5-flash-lite", 2),
     ("gemini-2.5-flash", 2),
+    ("gemini-2.5-flash-lite", 2),
 ]
 
 # Reusable client singleton (avoids re-init overhead per call)
@@ -151,10 +158,27 @@ class AIService:
         except Exception as e:
             return None, f"Download error: {str(e)}"
 
+    @staticmethod
+    def extract_text_from_pdf(pdf_bytes):
+        """Extracts text from PDF bytes using pypdf for clean text reference."""
+        try:
+            import io
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+            text_parts = []
+            for i, page in enumerate(reader.pages):
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(f"--- PAGE {i+1} ---\n{page_text}")
+            return "\n\n".join(text_parts).strip()
+        except Exception as e:
+            logger.error(f"[AI] Text extraction failed: {e}")
+            return ""
+
     # ─── World-Class ATS Resume Analysis ──────────────────────────────────
 
     @staticmethod
-    def analyze_resume(job_title, job_brief, resume_url):
+    def analyze_resume(job_title, job_brief, resume_url, selected_model=None):
         """
         Two-pass enterprise ATS screening engine.
 
@@ -173,6 +197,9 @@ class AIService:
         pdf_bytes, download_error = AIService.download_pdf(resume_url)
         if not pdf_bytes:
             return None, download_error or "Could not download resume"
+
+        # ── Step 1b: Extract Plain Text from PDF ────────────────────────────
+        extracted_text = AIService.extract_text_from_pdf(pdf_bytes)
 
         # ── Step 2: Unpack & Enrich Job Brief ─────────────────────────────
         required_skills  = job_brief.get("required_skills", "Not specified")
@@ -204,11 +231,12 @@ class AIService:
 
             pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
 
-            # ── Step 4: World-Class ATS Prompt ─────────────────────────────
+            # ── Step 4: World-Class 20-Dimension ATS Prompt ──────────────
             prompt = f"""You are an enterprise-grade AI ATS engine operating at the standard of
 Greenhouse, Lever, and Workday — used by the world's top 1% hiring organizations.
 
-Your task is a TWO-PASS evaluation of the attached resume against the job specification below.
+Your task is a COMPREHENSIVE 20-DIMENSION evaluation of the candidate's resume
+(provided both as binary PDF and as extracted text below) against the job specification.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 POSITION SPECIFICATION
@@ -228,9 +256,31 @@ REQUIRED SKILLS (treat as must-have unless explicitly labelled nice-to-have):
 JOB DESCRIPTION:
 {description}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXTRACTED RESUME TEXT (Use this for precise spelling, keyword matching, and reference):
+{extracted_text or "No text could be extracted; rely on the PDF attachment."}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SENIORITY EXPECTATIONS FOR THIS ROLE:
 {exp_expectations}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+══════════════════════════════════════════════════════
+SKILLS MATCHING & SYNONYM RULES (CRITICAL)
+══════════════════════════════════════════════════════
+To prevent false-negative skill mismatch flags:
+1. Map technology synonyms and standard aliases as matches:
+   - "sql" → MySQL, PostgreSQL, SQLite, MS SQL, SQL Server, Oracle, PL/SQL, T-SQL, NoSQL
+   - "pytorch" → PyTorch, pytorch, torch
+   - "tensorflow" → TensorFlow, tensorflow, keras
+   - "scikit learn" → scikit-learn, sklearn
+   - "mongodb" → MongoDB, Mongo
+   - "react" → ReactJS, React.js, React
+   - "django" → Django, django-rest-framework, DRF
+   - "node" → Node.js, NodeJS, Express
+   - "aws" → Amazon Web Services, S3, EC2, Lambda, CloudFront
+   - "gcp" → Google Cloud, BigQuery, Cloud Functions
+   - "ci/cd" → Jenkins, GitHub Actions, CircleCI, GitLab CI
+2. Search EVERY section of the resume (including bullet points, sidebar skills, projects, and university/course projects). Do NOT mark a skill as missing if it appears anywhere.
+3. Be extremely precise: if a skill is explicitly listed (e.g., PyTorch), do NOT count it as missing.
 
 ══════════════════════════════════════════════════════
 PASS 1 — HARD KNOCKOUT EVALUATION
@@ -239,7 +289,6 @@ Evaluate these knockout criteria FIRST. If any apply, cap the final match_score
 and set knockout_applied=true with a clear knockout_reason.
 
 KNOCKOUT RULE 1 — Critical Skills Deficit:
-  Count how many required skills the candidate has genuine, demonstrated experience with.
   If matched_skills / total_required_skills < 0.40:
     → max_score = 28, knockout_reason = "Fails critical skills threshold (< 40% match)"
 
@@ -257,55 +306,128 @@ KNOCKOUT RULE 4 — Resume Integrity Failure:
     → max_score = 20, knockout_reason = "Resume integrity failure — potential fabrication"
 
 ══════════════════════════════════════════════════════
-PASS 2 — DEEP HOLISTIC SCORING (100 points total)
+PASS 2 — 20-DIMENSION DEEP ANALYSIS
 ══════════════════════════════════════════════════════
-Score each dimension independently. Apply knockout cap to the final match_score if triggered.
 
-DIMENSION 1 — SKILLS DEPTH & BREADTH (35 points)
+CATEGORY 1 — PERSONAL INFORMATION EXTRACTION
+  Extract: full_name, email, phone, location, linkedin, github, portfolio, website.
+  Validate: Is email valid? Is phone present? Are professional links present?
+
+CATEGORY 2 — RESUME COMPLETENESS (0–100)
+  Score each section's presence and quality:
+  - Profile Summary (0–15)
+  - Experience (0–25)
+  - Education (0–15)
+  - Skills (0–15)
+  - Projects (0–10)
+  - Certifications (0–5)
+  - Links/Portfolio (0–5)
+  - Achievements (0–10)
+  Total completeness = sum of all sections.
+
+CATEGORY 3 — PROFESSIONAL SUMMARY ANALYSIS
+  Evaluate: Is a summary present? Does it mention years of experience?
+  Does it state domain/specialization? Does it list key skills?
+  Rate: STRONG / AVERAGE / WEAK / MISSING
+
+CATEGORY 4 — SKILLS ANALYSIS (30% weight)
+  Technical Skills: Categorize into Programming, Frameworks, Databases, Cloud, DevOps, AI/ML, Tools.
+  Soft Skills: Leadership, Communication, Problem Solving, Teamwork, etc.
   For each required skill, assess at three tiers:
-    Tier A (Demonstrated): Used in production/shipped projects with specifics → full pts
+    Tier A (Demonstrated): Used in production/shipped projects → full pts
     Tier B (Mentioned):    Listed but no evidence of real usage → half pts
-    Tier C (Absent):       Not found anywhere in resume → 0 pts
-  Score = sum(tier_scores) / total_required_skills × 35
-  Note: Bonus up to +3 pts for rare/highly valuable additional skills relevant to role.
+    Tier C (Absent):       Not found anywhere → 0 pts
+  Score = sum(tier_scores) / total_required_skills × 30
 
-DIMENSION 2 — EXPERIENCE LEVEL CALIBRATION (25 points)
-  Evaluate BOTH quantity (years) AND quality (seniority of roles held):
-  ┌─────────────────────────────────────────────────────────────────┐
-  │ Perfect match (years + role seniority align)         → 23–25   │
-  │ Good match (within ±1 yr, seniority close)           → 18–22   │
-  │ Partial (under by 1–2 yrs OR seniority mismatch)    → 10–17   │
-  │ Significant gap (under by 3+ yrs OR major mismatch) → 3–9     │
-  │ Overqualified for ENTRY/MID (overqualification risk) → 10–18   │
-  │ No relevant experience                               → 0–4     │
-  └─────────────────────────────────────────────────────────────────┘
-  CRITICAL: Validate career progression. 8 years total but only junior-level
-  role titles = inflated experience claim → penalize to 10–14 pts.
+CATEGORY 5 — EXPERIENCE ANALYSIS (25% weight)
+  Extract each role: company, title, start_date, end_date, duration_years.
+  Calculate: total_experience, relevant_experience, management_experience (in years).
+  Evaluate quality vs quantity of experience against the seniority expectations.
+  Score 0–25 based on match quality.
 
-DIMENSION 3 — ROLE & DOMAIN RELEVANCE (20 points)
-  Assess how directly their past work maps to THIS specific role:
-  - Same role title, same tech stack, same domain → 17–20 pts
-  - Adjacent role (e.g., backend for fullstack job), same domain → 12–16 pts
-  - Different role, overlapping domain → 7–11 pts
-  - Unrelated background entirely → 0–6 pts
+CATEGORY 6 — JOB STABILITY ANALYSIS
+  Detect: job hopping patterns, employment gaps, frequent switches, long tenures.
+  Calculate: average tenure across all roles.
+  Output: stability_score (0–100), risk_level (Low/Medium/High), observation text.
 
-DIMENSION 4 — IMPACT & ACHIEVEMENT QUALITY (12 points)
-  World-class candidates quantify everything. Evaluate:
-  - Hard metrics: user counts, performance improvements %, revenue impact → 10–12 pts
-  - Soft metrics: "improved", "optimized" without numbers → 5–9 pts
-  - Responsibilities listed, no achievements → 2–4 pts
-  - Vague or copied job descriptions → 0–1 pt
+CATEGORY 7 — EDUCATION ANALYSIS (10% weight)
+  Extract: degree, university, specialization, graduation_year, cgpa/gpa (if available).
+  Evaluate relevance to the role.
+  Score 0–10.
 
-DIMENSION 5 — LEARNING AGILITY & GROWTH SIGNALS (8 points)
-  Evidence of continuous self-improvement beyond mandatory job duties:
-  - Active side projects, OSS contributions, certifications, publications → 7–8 pts
-  - Certifications or 1–2 side projects → 4–6 pts
-  - No growth signals beyond job → 0–3 pts
+CATEGORY 8 — CERTIFICATION ANALYSIS (5% weight)
+  Extract all certifications with issuing authority.
+  Calculate relevance_score for each cert against the job requirements.
+  Score 0–5.
+
+CATEGORY 9 — PROJECT ANALYSIS (10% weight)
+  Extract: project name, role, tech stack, duration, impact.
+  Evaluate: complexity (High/Medium/Low), scale, relevance to the role.
+  Score 0–10.
+
+CATEGORY 10 — ATS KEYWORD MATCH (10% weight)
+  Compare the required skills from the JD against the resume.
+  List each required keyword as found (true/false).
+  Calculate: keyword_match_percentage.
+  Score 0–10.
+
+CATEGORY 11 — MISSING KEYWORDS ANALYSIS
+  List all required keywords NOT found in the resume.
+  Assess impact of each missing keyword: critical / moderate / low.
+
+CATEGORY 12 — ROLE FIT ANALYSIS
+  Determine candidate's assessed level: Junior / Mid-Level / Senior / Lead / Manager / Architect.
+  Compare against the role's required seniority ({exp_label}).
+  Verdict: PERFECT_FIT / GOOD_FIT / PARTIAL_FIT / OVERQUALIFIED / UNDERQUALIFIED.
+
+CATEGORY 13 — INDUSTRY EXPERIENCE
+  Extract all industries/domains the candidate has worked in:
+  e.g., Fintech, Healthcare, E-Commerce, SaaS, EdTech, HRTech, AI, etc.
+  Flag which are relevant to THIS role.
+
+CATEGORY 14 — CAREER PROGRESSION ANALYSIS
+  Map the progression path (e.g., Developer → Senior Developer → Lead → Manager).
+  Assess: Is career growth consistent? Are there demotions? Is progression valid?
+  career_growth_score (0–100).
+
+CATEGORY 15 — ACHIEVEMENT ANALYSIS (5% weight)
+  Detect quantified achievements:
+  - Revenue generated / cost saved / performance improved
+  - Team size managed / users served / uptime maintained
+  List each achievement with its metric.
+  Score 0–5.
+
+CATEGORY 16 — RESUME QUALITY ANALYSIS (5% weight)
+  Evaluate: grammar, formatting, structure, readability, spelling, professionalism.
+  resume_quality_score (0–100).
+  Score 0–5 for the weighted total.
+
+CATEGORY 17 — CANDIDATE STRENGTHS
+  Generate a list of the top 3–5 key strengths with reasoning.
+
+CATEGORY 18 — CANDIDATE RISKS / CONCERNS
+  Generate a list of potential risks/concerns.
+
+CATEGORY 19 — AI RECRUITER RECOMMENDATION
+  Based on the full 20-dimension analysis, output one of:
+  STRONG_HIRE / HIRE / CONSIDER / WEAK_CONSIDER / REJECT
+  Include a detailed reasoning paragraph.
+
+CATEGORY 20 — OVERALL ATS SCORE (Weighted)
+  Calculate the final match_score using these weights:
+    Skills Match (Cat 4)      : 30%
+    Experience (Cat 5)        : 25%
+    Education (Cat 7)         : 10%
+    Projects (Cat 9)          : 10%
+    Keywords (Cat 10)         : 10%
+    Achievements (Cat 15)     : 5%
+    Resume Quality (Cat 16)   : 5%
+    Certifications (Cat 8)    : 5%
+  match_score = weighted sum, clamped 0–100.
 
 ══════════════════════════════════════════════════════
 SCORING CALIBRATION REFERENCE
 ══════════════════════════════════════════════════════
-These are the expected distributions for a competitive applicant pool:
   90–100: Exceptional (< 2% of applicants) — immediate shortlist
   75–89:  Strong match — schedule technical screen
   60–74:  Qualified — worth interviewing to verify gaps
@@ -315,7 +437,7 @@ These are the expected distributions for a competitive applicant pool:
 
 BIAS MITIGATION DIRECTIVE:
   Do NOT allow these factors to influence scoring:
-  - Candidate name, gender markers, university prestige (evaluate skills, not pedigree)
+  - Candidate name, gender markers, university prestige
   - Employment gaps (evaluate explanation if given, not the gap itself)
   - Non-linear career paths (evaluate demonstrated competency only)
   Flag in bias_flags if any of these might have influenced your evaluation.
@@ -334,7 +456,32 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
       "location": "",
       "linkedin_url": "",
       "github_url": "",
-      "portfolio_url": ""
+      "portfolio_url": "",
+      "website_url": "",
+      "contact_validation": {{
+        "email_valid": true,
+        "phone_present": true,
+        "has_professional_links": true
+      }}
+    }},
+    "resume_completeness": {{
+      "profile_summary": 0,
+      "experience": 0,
+      "education": 0,
+      "skills": 0,
+      "projects": 0,
+      "certifications": 0,
+      "links": 0,
+      "achievements": 0,
+      "total_score": 0
+    }},
+    "professional_summary": {{
+      "present": true,
+      "mentions_experience_years": true,
+      "mentions_domain": true,
+      "mentions_key_skills": true,
+      "quality": "STRONG|AVERAGE|WEAK|MISSING",
+      "summary_text": ""
     }},
     "career_summary": {{
       "primary_role": "",
@@ -343,11 +490,22 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
       "specialization": "",
       "total_years_experience": 0,
       "relevant_years_experience": 0,
-      "career_level_assessed": "",
+      "management_years_experience": 0,
+      "career_level_assessed": "Junior|Mid-Level|Senior|Lead|Manager|Architect",
       "career_progression_valid": true,
       "progression_note": ""
     }},
     "skills_assessment": {{
+      "technical_skills": {{
+        "programming": [],
+        "frameworks": [],
+        "databases": [],
+        "cloud": [],
+        "devops": [],
+        "ai_ml": [],
+        "tools": []
+      }},
+      "soft_skills": [],
       "matched_required": [
         {{"skill": "", "tier": "A|B", "evidence": ""}}
       ],
@@ -355,7 +513,8 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
         {{"skill": "", "impact": "critical|moderate|low"}}
       ],
       "additional_valuable": [],
-      "skills_match_percentage": 0
+      "skills_match_percentage": 0,
+      "skills_score": 0
     }},
     "experience_timeline": [
       {{
@@ -364,33 +523,98 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
         "start_date": "",
         "end_date": "",
         "duration_years": 0,
-        "seniority_level": "junior|mid|senior|lead",
+        "seniority_level": "junior|mid|senior|lead|manager",
+        "is_management": false,
         "technologies": [],
         "key_achievements": [],
         "domain_relevant": true
       }}
     ],
-    "projects": [
-      {{
-        "name": "",
-        "description": "",
-        "tech_stack": [],
-        "scale": "",
-        "impact_quantified": false,
-        "impact_description": "",
-        "relevance_score": 0
-      }}
-    ],
+    "job_stability": {{
+      "stability_score": 0,
+      "average_tenure_years": 0,
+      "risk_level": "Low|Medium|High",
+      "job_hopping_detected": false,
+      "employment_gaps": [],
+      "longest_tenure_years": 0,
+      "observation": ""
+    }},
     "education": [
       {{
         "institution": "",
         "degree": "",
         "field": "",
         "year": "",
+        "cgpa": "",
         "relevant": true
       }}
     ],
-    "certifications": [],
+    "certifications": [
+      {{
+        "name": "",
+        "issuing_authority": "",
+        "year": "",
+        "relevance_score": 0
+      }}
+    ],
+    "projects": [
+      {{
+        "name": "",
+        "role": "",
+        "description": "",
+        "tech_stack": [],
+        "duration": "",
+        "impact_description": "",
+        "impact_quantified": false,
+        "complexity": "High|Medium|Low",
+        "scale": "",
+        "relevance_score": 0
+      }}
+    ],
+    "keyword_match": {{
+      "required_keywords": [
+        {{"keyword": "", "found": true}}
+      ],
+      "keyword_match_percentage": 0,
+      "keywords_score": 0
+    }},
+    "missing_keywords": [
+      {{"keyword": "", "impact": "critical|moderate|low"}}
+    ],
+    "role_fit": {{
+      "assessed_level": "Junior|Mid-Level|Senior|Lead|Manager|Architect",
+      "required_level": "{exp_label}",
+      "fit_verdict": "PERFECT_FIT|GOOD_FIT|PARTIAL_FIT|OVERQUALIFIED|UNDERQUALIFIED",
+      "fit_detail": ""
+    }},
+    "industry_experience": {{
+      "sectors": [],
+      "relevant_sectors": [],
+      "has_domain_experience": true
+    }},
+    "career_progression": {{
+      "progression_path": [],
+      "career_growth_score": 0,
+      "consistent_growth": true,
+      "has_demotions": false,
+      "progression_note": ""
+    }},
+    "achievements": [
+      {{
+        "description": "",
+        "metric": "",
+        "category": "revenue|cost_savings|performance|team|users|other"
+      }}
+    ],
+    "resume_quality": {{
+      "grammar_score": 0,
+      "formatting_score": 0,
+      "structure_score": 0,
+      "readability_score": 0,
+      "professionalism_score": 0,
+      "resume_quality_score": 0,
+      "issues": []
+    }},
     "experience_gap_analysis": {{
       "required_years_min": {exp_years_min},
       "required_years_max": {exp_years_max},
@@ -399,14 +623,6 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
       "gap_years": 0,
       "verdict": "MEETS|BELOW|OVERQUALIFIED",
       "detail": ""
-    }},
-    "skills_gap_analysis": {{
-      "total_required": 0,
-      "matched_count": 0,
-      "missing_count": 0,
-      "missing_critical": [],
-      "match_percentage": 0,
-      "knockout_triggered": false
     }},
     "integrity_signals": {{
       "resume_ai_probability": 0,
@@ -419,16 +635,31 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
   "recruiter_view": {{
     "match_score": 0,
     "score_breakdown": {{
-      "skills_depth": 0,
-      "experience_calibration": 0,
-      "role_domain_relevance": 0,
-      "impact_quality": 0,
-      "growth_signals": 0,
+      "skills_match": 0,
+      "experience": 0,
+      "education": 0,
+      "projects": 0,
+      "keywords": 0,
+      "achievements": 0,
+      "resume_quality": 0,
+      "certifications": 0,
       "total_before_knockout": 0
+    }},
+    "score_weights": {{
+      "skills_match": 30,
+      "experience": 25,
+      "education": 10,
+      "projects": 10,
+      "keywords": 10,
+      "achievements": 5,
+      "resume_quality": 5,
+      "certifications": 5
     }},
     "knockout_applied": false,
     "knockout_rule_triggered": "",
     "knockout_reason": "",
+    "recommendation": "STRONG_HIRE|HIRE|CONSIDER|WEAK_CONSIDER|REJECT",
+    "recommendation_reason": "",
     "pipeline_disposition": "SHORTLIST|INTERVIEW|HOLD|REJECT",
     "disposition_rationale": "",
     "strengths": [],
@@ -455,8 +686,36 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
 }}"""
 
             # ── Step 5: Invoke Gemini with Model Pipeline ───────────────────
+            # Whitelisted Gemini 2+ and 3+ models
+            ALLOWED_GEMINI_2_MODELS = [
+                "gemini-3.5-flash",
+                "gemini-3.5-flash-live",
+                "gemini-3.0-flash-live",
+                "gemini-3.1-pro-preview",
+                "gemini-3.1-flash-lite",
+                "gemini-3-pro-preview",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-pro",
+                "gemini-2.0-flash",
+                "gemini-2.0-flash-thinking-exp",
+                "gemini-2.0-pro-exp",
+                "text-multilingual-embedding-002"
+            ]
+
+            pipeline = []
+            if selected_model and selected_model in ALLOWED_GEMINI_2_MODELS:
+                pipeline.append((selected_model, 2))
+                # Add default fallbacks if different
+                for m, retries in MODEL_PIPELINE:
+                    if m != selected_model:
+                        pipeline.append((m, retries))
+            else:
+                pipeline = MODEL_PIPELINE
+
             last_error = None
-            for model_name, max_retries in MODEL_PIPELINE:
+            for model_name, max_retries in pipeline:
                 for attempt in range(1, max_retries + 1):
                     try:
                         t0 = time.time()
@@ -466,7 +725,7 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
                             model=model_name,
                             contents=[pdf_part, prompt],
                             config=types.GenerateContentConfig(
-                                max_output_tokens=4096,
+                                max_output_tokens=65536,
                                 temperature=0.0,  # Fully deterministic — enterprise ATS must be consistent
                                 response_mime_type="application/json",
                             ),
@@ -499,63 +758,24 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
             print(f"[AI] Outer analysis error: {e}")
             return 0, f"AI analysis failed: {str(e)}"
 
-    # ─── Response Parser ──────────────────────────────────────────────────
+    # ─── Response Parser (delegates to AI.parsers) ────────────────────────
 
     @staticmethod
     def _parse_response(content):
-        """
-        Parses the ATS JSON response.
-        Extracts match_score and returns (score, full_json_string).
-        Also applies post-parse score clamping and knockout cap enforcement.
-        """
-        try:
-            clean = content.strip()
-            # Strip any accidental markdown fences
-            if clean.startswith("```json"):
-                clean = clean[7:]
-            if clean.startswith("```"):
-                clean = clean[3:]
-            if clean.endswith("```"):
-                clean = clean[:-3]
-            clean = clean.strip()
+        """Parse the ATS JSON response. Delegates to AI.parsers.parse_ai_response."""
+        return parse_ai_response(content)
 
-            data = json.loads(clean)
-            rv = data.get("recruiter_view", {})
+    @staticmethod
+    def repair_truncated_json(json_str):
+        """Repair truncated JSON. Delegates to AI.parsers.repair_truncated_json."""
+        return _repair_truncated_json(json_str)
 
-            raw_score = rv.get("match_score", 0)
-            score = max(0, min(100, int(raw_score)))
+    @staticmethod
+    def _get_summary_from_dict(d):
+        """Extract summary from dict. Delegates to AI.parsers.get_summary_from_dict."""
+        return _get_summary_from_dict(d)
 
-            # Enforce knockout cap if flagged but score exceeds cap
-            if rv.get("knockout_applied"):
-                knockout_rule = rv.get("knockout_rule_triggered", "")
-                if "RULE 1" in knockout_rule or "skills" in knockout_rule.lower():
-                    score = min(score, 28)
-                elif "RULE 2" in knockout_rule or "experience" in knockout_rule.lower():
-                    score = min(score, 35)
-                elif "RULE 3" in knockout_rule or "domain" in knockout_rule.lower():
-                    score = min(score, 30)
-                elif "RULE 4" in knockout_rule or "integrity" in knockout_rule.lower():
-                    score = min(score, 20)
-
-            # Write the clamped score back into the data
-            data["recruiter_view"]["match_score"] = score
-
-            # Ensure pipeline_disposition aligns with score if not set correctly
-            disposition = rv.get("pipeline_disposition", "")
-            if not disposition:
-                if score >= 90:
-                    disposition = "SHORTLIST"
-                elif score >= 75:
-                    disposition = "INTERVIEW"
-                elif score >= 45:
-                    disposition = "HOLD"
-                else:
-                    disposition = "REJECT"
-                data["recruiter_view"]["pipeline_disposition"] = disposition
-
-            logger.info(f"[AI Parser] Score={score} | Disposition={disposition} | Knockout={rv.get('knockout_applied', False)}")
-            return score, json.dumps(data)
-
-        except (json.JSONDecodeError, ValueError, KeyError) as e:
-            print(f"[AI] JSON Parse Error: {e}")
-            return 0, content
+    @staticmethod
+    def extract_summary_and_analysis(ai_analysis_str):
+        """Extract summary + analysis. Delegates to AI.parsers.extract_summary_and_analysis."""
+        return _extract_summary_and_analysis(ai_analysis_str)

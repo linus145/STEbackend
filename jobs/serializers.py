@@ -253,6 +253,7 @@ class JobApplicationSerializer(serializers.ModelSerializer):
 
     applicant = ApplicantMiniSerializer(read_only=True)
     job_title = serializers.CharField(source="job.title", read_only=True)
+    is_synced = serializers.SerializerMethodField()
 
     class Meta:
         model = JobApplication
@@ -268,8 +269,13 @@ class JobApplicationSerializer(serializers.ModelSerializer):
             "ai_analysis",
             "applied_at",
             "updated_at",
+            "is_synced",
         )
-        read_only_fields = ("id", "job", "job_title", "applicant", "ai_score", "ai_analysis", "applied_at", "updated_at")
+        read_only_fields = ("id", "job", "job_title", "applicant", "ai_score", "ai_analysis", "applied_at", "updated_at", "is_synced")
+
+    def get_is_synced(self, obj):
+        return hasattr(obj, 'interview_candidate')
+
 
 
 class JobApplicationCreateSerializer(serializers.ModelSerializer):

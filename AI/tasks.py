@@ -11,15 +11,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logger = logging.getLogger("ai.tasks")
 User = get_user_model()
 
-def screen_single_candidate(app_id, email, job_title, job_brief, resume_url):
+def screen_single_candidate(app_id, email, job_title, job_brief, resume_url, model=None):
     """
     Helper function to screen a single candidate in a thread.
     job_brief is a structured dict with all ATS criteria.
     """
     try:
-        logger.info(f"[AI Thread] Starting strict ATS screening for: {email}")
+        logger.info(f"[AI Thread] Starting strict ATS screening for: {email} using model: {model}")
         score, analysis_json = AIService.analyze_resume(
-            job_title, job_brief, resume_url
+            job_title, job_brief, resume_url, selected_model=model
         )
         return app_id, score, analysis_json
     except Exception as e:
@@ -30,7 +30,7 @@ def screen_single_candidate(app_id, email, job_title, job_brief, resume_url):
         connection.close()
 
 @shared_task(bind=True)
-def process_ai_screening(self, job_id, user_id, app_ids, report_id):
+def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
     """
     Celery task to handle background resume screening with parallel threads.
     """
@@ -44,7 +44,7 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
             JobApplication.objects.filter(id__in=app_ids).select_related("applicant")
         )
 
-        logger.info(f"[AI Task] Parallel screening {len(apps_to_screen)} candidates for job: {job.title}")
+        logger.info(f"[AI Task] Parallel screening {len(apps_to_screen)} candidates for job: {job.title} using model: {model}")
 
         processed_count = 0
         errors = []
@@ -76,7 +76,7 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
             future_to_app = {
                 executor.submit(
                     screen_single_candidate,
-                    app.id, app.applicant.email, job.title, job_brief, app.resume_url
+                    app.id, app.applicant.email, job.title, job_brief, app.resume_url, model
                 ): app for app in apps_to_screen if app.resume_url
             }
 
@@ -129,23 +129,31 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
             .order_by("-ai_score")
         )
         
+        # Fetch and self-heal mismatching database scores on-the-fly
+        all_scored_list = list(all_scored[:50])
+        for cand in all_scored_list:
+            summary, analysis_obj = AIService.extract_summary_and_analysis(cand.ai_analysis)
+            if analysis_obj and isinstance(analysis_obj, dict):
+                rv_score = analysis_obj.get("recruiter_view", {}).get("match_score")
+                if rv_score is not None:
+                    try:
+                        parsed_score = int(rv_score)
+                        if parsed_score != cand.ai_score:
+                            cand.ai_score = parsed_score
+                            cand.save(update_fields=["ai_score"])
+                    except:
+                        pass
+
+        # Sort by corrected score descending to update priorities/rankings
+        all_scored_list.sort(key=lambda c: c.ai_score or 0, reverse=True)
+
         results_data = []
-        for rank, cand in enumerate(all_scored[:50], 1):
-            summary = ""
-            analysis_obj = None
-            try:
-                if cand.ai_analysis and cand.ai_analysis.strip().startswith("{"):
-                    analysis_obj = json.loads(cand.ai_analysis)
-                    summary = analysis_obj.get("recruiter_view", {}).get("explanation", "")
-            except:
-                pass
-            
-            if not summary:
-                summary = (
-                    (cand.ai_analysis[:500] + "...")
-                    if cand.ai_analysis and len(cand.ai_analysis) > 500
-                    else (cand.ai_analysis or "No analysis available.")
-                )
+        for rank, cand in enumerate(all_scored_list, 1):
+            summary, analysis_obj = AIService.extract_summary_and_analysis(cand.ai_analysis)
+
+            # Safe access helpers
+            rv = analysis_obj.get("recruiter_view", {}) if analysis_obj else {}
+            intel = analysis_obj.get("intelligence", {}) if analysis_obj else {}
 
             results_data.append({
                 "id": str(cand.id),
@@ -155,35 +163,34 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
                 "score": cand.ai_score,
                 "summary": summary,
                 "analysis": analysis_obj,
-                # Enriched fields from world-class ATS response
-                "pipeline_disposition": (
-                    analysis_obj.get("recruiter_view", {}).get("pipeline_disposition", "")
-                    if analysis_obj else ""
-                ),
-                "knockout_applied": (
-                    analysis_obj.get("recruiter_view", {}).get("knockout_applied", False)
-                    if analysis_obj else False
-                ),
-                "knockout_reason": (
-                    analysis_obj.get("recruiter_view", {}).get("knockout_reason", "")
-                    if analysis_obj else ""
-                ),
-                "hiring_confidence": (
-                    analysis_obj.get("recruiter_view", {}).get("hiring_confidence", "")
-                    if analysis_obj else ""
-                ),
-                "recruiter_action_memo": (
-                    analysis_obj.get("recruiter_view", {}).get("recruiter_action_memo", "")
-                    if analysis_obj else ""
-                ),
-                "skills_match_pct": (
-                    analysis_obj.get("intelligence", {}).get("skills_assessment", {}).get("skills_match_percentage", 0)
-                    if analysis_obj else 0
-                ),
-                "career_level": (
-                    analysis_obj.get("intelligence", {}).get("career_summary", {}).get("career_level_assessed", "")
-                    if analysis_obj else ""
-                ),
+                # ─── Core recruiter view fields ───────────────────
+                "pipeline_disposition": rv.get("pipeline_disposition", ""),
+                "knockout_applied": rv.get("knockout_applied", False),
+                "knockout_reason": rv.get("knockout_reason", ""),
+                "hiring_confidence": rv.get("hiring_confidence", ""),
+                "recruiter_action_memo": rv.get("recruiter_action_memo", ""),
+                "skills_match_pct": intel.get("skills_assessment", {}).get("skills_match_percentage", 0),
+                "career_level": intel.get("career_summary", {}).get("career_level_assessed", ""),
+                # ─── 20-Dimension enriched fields ─────────────────
+                "recommendation": rv.get("recommendation", ""),
+                "recommendation_reason": rv.get("recommendation_reason", ""),
+                "score_breakdown": rv.get("score_breakdown", {}),
+                "score_weights": rv.get("score_weights", {}),
+                "resume_completeness": intel.get("resume_completeness", {}).get("total_score", 0),
+                "resume_completeness_detail": intel.get("resume_completeness", {}),
+                "professional_summary_quality": intel.get("professional_summary", {}).get("quality", ""),
+                "job_stability_score": intel.get("job_stability", {}).get("stability_score", 0),
+                "job_stability": intel.get("job_stability", {}),
+                "keyword_match_pct": intel.get("keyword_match", {}).get("keyword_match_percentage", 0),
+                "keyword_match": intel.get("keyword_match", {}),
+                "missing_keywords": intel.get("missing_keywords", []),
+                "role_fit": intel.get("role_fit", {}),
+                "industry_experience": intel.get("industry_experience", {}),
+                "career_progression": intel.get("career_progression", {}),
+                "career_growth_score": intel.get("career_progression", {}).get("career_growth_score", 0),
+                "achievements": intel.get("achievements", []),
+                "resume_quality_score": intel.get("resume_quality", {}).get("resume_quality_score", 0),
+                "resume_quality": intel.get("resume_quality", {}),
             })
 
         report.results = {
@@ -193,6 +200,7 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
             "total_applicants": all_scored.count(),
             "top_candidates": results_data,
             "errors": errors,
+            "model_used": model,
         }
         report.save()
 
@@ -244,6 +252,7 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id):
             report = AIScreeningReport.objects.get(id=report_id)
             report.results["status"] = "failed"
             report.results["error"] = str(e)
+            report.results["model_used"] = model
             report.save()
         except:
             pass

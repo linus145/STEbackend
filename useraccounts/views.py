@@ -673,31 +673,14 @@ class RecruiterContactView(APIView, RequestResponseMixin):
                 }
                 html_body = render_to_string("emails/direct_message.html", context)
 
-                # Dynamically fetch the notification connection settings
-                backend = getattr(settings, "NOTIFICATION_EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
-                host = getattr(settings, "NOTIFICATION_EMAIL_HOST", "smtp-relay.brevo.com")
-                port = int(getattr(settings, "NOTIFICATION_EMAIL_PORT", 587))
-                username = getattr(settings, "NOTIFICATION_EMAIL_HOST_USER", "")
-                password = getattr(settings, "NOTIFICATION_EMAIL_HOST_PASSWORD", "")
-                use_tls = getattr(settings, "NOTIFICATION_EMAIL_USE_TLS", True)
+                from useraccounts.tasks import send_notification_email_async
                 from_email = getattr(settings, "NOTIFICATION_DEFAULT_FROM_EMAIL", "lakkavaramlinus@gmail.com")
 
-                connection = get_connection(
-                    backend=backend,
-                    host=host,
-                    port=port,
-                    username=username,
-                    password=password,
-                    use_tls=use_tls,
-                )
-
-                send_mail(
+                send_notification_email_async.delay(
                     subject,
                     message_content,
-                    from_email,
                     [target_user.email],
-                    fail_silently=False,
-                    connection=connection,
+                    from_email=from_email,
                     html_message=html_body,
                 )
             except Exception as e:

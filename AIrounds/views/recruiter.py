@@ -202,17 +202,19 @@ class RecruiterSessionListView(APIView, ResponseMixin):
         try:
             company = CompanyProfile.objects.get(owner=request.user)
 
-            # 1. Get all InterviewSessions for the company that are in the INTERVIEW stage
+            # 1. Get all InterviewSessions for the company that are in the INTERVIEW stage or have an InterviewCandidate mapping
+            from django.db.models import Q
             all_sessions = (
                 InterviewSession.objects.filter(
-                    application__job__company=company,
-                    application__job__status__in=["ACTIVE", "DRAFT"],
-                    application__status="INTERVIEW",
+                    Q(application__job__company=company) &
+                    Q(application__job__status__in=["ACTIVE", "DRAFT"]) &
+                    (Q(application__status="INTERVIEW") | Q(interview_candidate__isnull=False))
                 )
                 .select_related("candidate", "application", "application__job")
                 .prefetch_related("rounds")
                 .order_by("-created_at")
             )
+
 
             data = []
             seen_application_ids = set()
@@ -257,6 +259,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                         "is_orchestrated": True,
                         "exam_credentials": exam_creds,
                         "exam_link_url": exam_link_url,
+                        "application_status": s.application.status if s.application else None,
                     }
                 )
 
@@ -284,6 +287,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                         "rounds_count": 0,
                         "application_id": str(app.id),
                         "is_orchestrated": False,
+                        "application_status": app.status,
                     }
                 )
 

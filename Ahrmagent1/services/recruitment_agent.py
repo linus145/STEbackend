@@ -318,36 +318,28 @@ class RecruitmentAgentService(BrowserAgentService):
                     .order_by("-ai_score")
                 )
 
+                # Fetch and self-heal mismatching database scores on-the-fly
+                from AI.services import AIService
+                all_scored_list = list(all_scored[:10])
+                for cand in all_scored_list:
+                    summary, analysis_dict = AIService.extract_summary_and_analysis(cand.ai_analysis)
+                    if analysis_dict and isinstance(analysis_dict, dict):
+                        rv_score = analysis_dict.get("recruiter_view", {}).get("match_score")
+                        if rv_score is not None:
+                            try:
+                                parsed_score = int(rv_score)
+                                if parsed_score != cand.ai_score:
+                                    cand.ai_score = parsed_score
+                                    cand.save(update_fields=["ai_score"])
+                            except:
+                                pass
+
+                # Sort by corrected score descending to update priorities/rankings
+                all_scored_list.sort(key=lambda c: c.ai_score or 0, reverse=True)
+
                 results_data = []
-                for rank, cand in enumerate(all_scored[:10], 1):
-                    # ai_analysis is stored as a JSON string in the DB by AIService
-                    import json
-                    try:
-                        analysis_dict = json.loads(cand.ai_analysis) if isinstance(cand.ai_analysis, str) else cand.ai_analysis
-                    except Exception:
-                        analysis_dict = {}
-
-                    # Extract the rich recruiter_view data from AI analysis
-                    recruiter_view = analysis_dict.get('recruiter_view', {})
-                    intelligence = analysis_dict.get('intelligence', {})
-
-                    # Build a meaningful summary from actual AI analysis
-                    explanation = recruiter_view.get('explanation', '')
-                    strengths = recruiter_view.get('strengths', [])
-                    recommended_action = recruiter_view.get('recommended_action', '')
-                    startup_fit = recruiter_view.get('startup_fit', '')
-                    primary_role = intelligence.get('summary', {}).get('primary_role', '')
-                    years_exp = intelligence.get('summary', {}).get('years_of_experience', 0)
-
-                    # Compose a rich summary from available data
-                    if explanation:
-                        summary = explanation
-                    elif strengths:
-                        summary = f"{primary_role} with {years_exp}+ years experience. Key strengths: {', '.join(strengths[:3])}"
-                    elif primary_role:
-                        summary = f"{primary_role} — {recommended_action}" if recommended_action else f"{primary_role} with {years_exp}+ years experience"
-                    else:
-                        summary = recommended_action or 'AI screening completed'
+                for rank, cand in enumerate(all_scored_list, 1):
+                    summary, analysis_dict = AIService.extract_summary_and_analysis(cand.ai_analysis)
 
                     results_data.append(
                         {

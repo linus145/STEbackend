@@ -90,13 +90,15 @@ class InterviewOrchestrator:
         Automatically orchestrates an interview based on the application and job data.
         Triggered when application status changes to 'INTERVIEW'.
         """
-        # 0. Check for existing session to prevent duplication
-        existing_session = InterviewSession.objects.filter(application=application).first()
-        if existing_session:
-            logger.info(f"Auto-orchestration skipped: Session already exists for App: {application.id}")
-            return existing_session
+        # 0. Check for existing InterviewCandidate registration to prevent duplicate syncs
+        from AIrounds.models import InterviewCandidate
+        existing_cand = InterviewCandidate.objects.filter(application=application).first()
+        if existing_cand:
+            print("Data already synced")
+            logger.info(f"Auto-orchestration skipped: Candidate already synced for App: {application.id}")
+            return existing_cand.session
 
-        # 1. Prepare default overall config
+        # Prepare default overall config
         overall_config = {
             'expires_in_days': 7,
             'auto_generated': True,
@@ -151,6 +153,12 @@ class InterviewOrchestrator:
                 settings=r_cfg['settings'],
                 status='PENDING'
             )
+
+        # 5. Create InterviewCandidate mapping entry
+        InterviewCandidate.objects.create(
+            application=application,
+            session=session
+        )
             
         logger.info(f"Auto-orchestrated interview for {application.applicant.email} (App: {application.id})")
         return session

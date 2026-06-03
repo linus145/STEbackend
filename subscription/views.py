@@ -116,6 +116,7 @@ class SubscriptionPlanListView(generics.ListAPIView):
                 "has_analytics_dashboard": True,
                 "has_third_party_integrations": True,
                 "has_role_based_access": True,
+                "has_hr_toolkit": True,
             },
             {
                 "name": "Enterprise AI OS",
