@@ -216,6 +216,7 @@ class UserSubscriptionView(APIView):
                 return Response({"error": "No plan selected. Please choose a plan before submitting payment."}, status=status.HTTP_400_BAD_REQUEST)
 
             transaction_id = request.data.get("transaction_id")
+            bank_name = request.data.get("bank_name")
             payment_method = request.data.get("payment_method")
             payment_type = request.data.get("payment_type", "new")
             upgrade_upi_or_phone = request.data.get("upgrade_upi_or_phone")
@@ -260,6 +261,7 @@ class UserSubscriptionView(APIView):
                 subscription=subscription,
                 plan=plan,
                 transaction_id=transaction_id.strip(),
+                bank_name=bank_name.strip() if bank_name else None,
                 payment_method=payment_method.strip(),
                 payment_type=payment_type,
                 upgrade_upi_or_phone=upgrade_upi_or_phone.strip() if upgrade_upi_or_phone else None,

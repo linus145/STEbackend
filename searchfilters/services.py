@@ -26,46 +26,100 @@ class SearchService:
         if not filters:
             return queryset.order_by("-created_at")
 
-        # Basic text search
+        # Basic text search — split into individual keywords for precise matching
         search_query = filters.get("search")
         if search_query:
-            queryset = queryset.filter(
-                Q(title__icontains=search_query)
-                | Q(description__icontains=search_query)
-                | Q(company__company_name__icontains=search_query)
-                | Q(location__icontains=search_query)
-                | Q(skills__name__icontains=search_query)
-                | Q(job_type__icontains=search_query)
-                | Q(work_mode__icontains=search_query)
-                | Q(experience_level__icontains=search_query)
-                | Q(department__icontains=search_query)
-            ).distinct()
+            keywords = search_query.strip().split()
+            for keyword in keywords:
+                queryset = queryset.filter(
+                    Q(title__icontains=keyword)
+                    | Q(description__icontains=keyword)
+                    | Q(company__company_name__icontains=keyword)
+                    | Q(location__icontains=keyword)
+                    | Q(skills__name__icontains=keyword)
+                    | Q(job_type__icontains=keyword)
+                    | Q(work_mode__icontains=keyword)
+                    | Q(experience_level__icontains=keyword)
+                    | Q(department__icontains=keyword)
+                )
+            queryset = queryset.distinct()
 
         # Standard filters
-        if filters.get("job_type"):
-            queryset = queryset.filter(job_type=filters["job_type"])
-        if filters.get("work_mode"):
-            queryset = queryset.filter(work_mode=filters["work_mode"])
-        if filters.get("experience_level"):
-            queryset = queryset.filter(experience_level=filters["experience_level"])
+        if filters.get("job_types"):
+            queryset = queryset.filter(job_type__in=filters["job_types"])
+        if filters.get("work_modes"):
+            queryset = queryset.filter(work_mode__in=filters["work_modes"])
+        if filters.get("experience_levels"):
+            queryset = queryset.filter(experience_level__in=filters["experience_levels"])
+        
+        # Location filter
+        location = filters.get("location")
+        if location:
+            queryset = queryset.filter(location__icontains=location)
+            
+        # Salary Range filters
+        salary_min = filters.get("salary_min")
+        if salary_min:
+            try:
+                queryset = queryset.filter(salary_max__gte=int(salary_min))
+            except ValueError:
+                pass
+                
+        salary_max = filters.get("salary_max")
+        if salary_max:
+            try:
+                queryset = queryset.filter(salary_min__lte=int(salary_max))
+            except ValueError:
+                pass
+                
+        # Easy Apply filter
+        if filters.get("easy_apply"):
+            queryset = queryset.filter(is_ai_generated=True)
+
+        # Posted Date filter
+        posted_date = filters.get("posted_date")
+        if posted_date:
+            from django.utils import timezone
+            from datetime import timedelta
+            now = timezone.now()
+            if posted_date == "24h":
+                queryset = queryset.filter(created_at__gte=now - timedelta(days=1))
+            elif posted_date == "week":
+                queryset = queryset.filter(created_at__gte=now - timedelta(days=7))
+            elif posted_date == "month":
+                queryset = queryset.filter(created_at__gte=now - timedelta(days=30))
 
         # Category mapping (Premium Dashboard Filters)
         category = filters.get("category")
         if category:
             if category == "IT":
-                queryset = queryset.filter(skills__category="IT").distinct()
+                queryset = queryset.filter(Q(skills__category="IT") | Q(job_category="IT")).distinct()
             elif category == "Non-IT":
-                queryset = queryset.filter(skills__category="NON_IT").distinct()
+                queryset = queryset.filter(Q(skills__category="NON_IT") | Q(job_category="NON_IT")).distinct()
             elif category == "Remote":
                 queryset = queryset.filter(work_mode="REMOTE")
+            elif category == "Hybrid":
+                queryset = queryset.filter(work_mode="HYBRID")
+            elif category == "On-site" or category == "Onsite":
+                queryset = queryset.filter(work_mode="ONSITE")
             elif category == "Full-time":
                 queryset = queryset.filter(job_type="FULL_TIME")
+            elif category == "Part-time" or category == "Part-Time":
+                queryset = queryset.filter(job_type="PART_TIME")
             elif category == "Contract":
                 queryset = queryset.filter(job_type="CONTRACT")
             elif category == "Internship":
                 queryset = queryset.filter(job_type="INTERNSHIP")
             elif category == "Freelance":
                 queryset = queryset.filter(job_type="CONTRACT")
+            elif category == "Entry Level" or category == "Entry":
+                queryset = queryset.filter(experience_level="ENTRY")
+            elif category == "Mid Level" or category == "Mid":
+                queryset = queryset.filter(experience_level="MID")
+            elif category == "Senior Level" or category == "Senior":
+                queryset = queryset.filter(experience_level="SENIOR")
+            elif category == "Lead":
+                queryset = queryset.filter(experience_level="LEAD")
             elif category == "B2_APPLY":
                 queryset = queryset.filter(is_ai_generated=True)
 
@@ -83,13 +137,15 @@ class SearchService:
         if not filters:
             return queryset.order_by("-applied_at")
 
-        # Basic text search (Job title or company name)
+        # Basic text search — split into keywords for precise matching
         search_query = filters.get("search")
         if search_query:
-            queryset = queryset.filter(
-                Q(job__title__icontains=search_query)
-                | Q(job__company__company_name__icontains=search_query)
-            )
+            keywords = search_query.strip().split()
+            for keyword in keywords:
+                queryset = queryset.filter(
+                    Q(job__title__icontains=keyword)
+                    | Q(job__company__company_name__icontains=keyword)
+                )
 
         # Status filter
         status_filter = filters.get("status")
@@ -109,7 +165,9 @@ class SearchService:
 
         search_query = filters.get("search")
         if search_query:
-            queryset = queryset.filter(content__icontains=search_query)
+            keywords = search_query.strip().split()
+            for keyword in keywords:
+                queryset = queryset.filter(content__icontains=keyword)
 
         return queryset.order_by("-created_at")
 
@@ -122,9 +180,11 @@ class SearchService:
 
         search_query = filters.get("search")
         if search_query:
-            queryset = queryset.filter(
-                Q(title__icontains=search_query) | Q(content__icontains=search_query)
-            )
+            keywords = search_query.strip().split()
+            for keyword in keywords:
+                queryset = queryset.filter(
+                    Q(title__icontains=keyword) | Q(content__icontains=keyword)
+                )
 
         return queryset.order_by("-created_at")
 
@@ -137,11 +197,13 @@ class SearchService:
 
         search_query = filters.get("search")
         if search_query:
-            queryset = queryset.filter(
-                Q(first_name__icontains=search_query)
-                | Q(last_name__icontains=search_query)
-                | Q(email__icontains=search_query)
-            )
+            keywords = search_query.strip().split()
+            for keyword in keywords:
+                queryset = queryset.filter(
+                    Q(first_name__icontains=keyword)
+                    | Q(last_name__icontains=keyword)
+                    | Q(email__icontains=keyword)
+                )
 
         return queryset.order_by("-created_at")
 

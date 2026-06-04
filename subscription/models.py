@@ -306,6 +306,12 @@ class ManualPayment(models.Model):
         max_length=255,
         unique=True,
     )
+    bank_name = models.CharField(
+        max_length=150,
+        blank=True,
+        null=True,
+        help_text="Bank name of the sender/payer (e.g. HDFC Bank, ICICI Bank)",
+    )
     payment_method = models.CharField(
         max_length=100,
         help_text="e.g. UPI, GPay, PhonePe, Net Banking",

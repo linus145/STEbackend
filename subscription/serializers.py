@@ -51,6 +51,7 @@ class ManualPaymentSerializer(serializers.ModelSerializer):
             "plan",
             "plan_name",
             "transaction_id",
+            "bank_name",
             "payment_method",
             "payment_type",
             "upgrade_upi_or_phone",

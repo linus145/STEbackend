@@ -36,12 +36,25 @@ class JobSearchView(ListAPIView, ResponseMixin):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
+        job_type = self.request.query_params.get("job_type")
+        work_mode = self.request.query_params.get("work_mode")
+        experience_level = self.request.query_params.get("experience_level")
+        
+        job_types = job_type.split(",") if job_type else []
+        work_modes = work_mode.split(",") if work_mode else []
+        experience_levels = experience_level.split(",") if experience_level else []
+
         filters = {
             "search": self.request.query_params.get("search"),
-            "job_type": self.request.query_params.get("job_type"),
-            "work_mode": self.request.query_params.get("work_mode"),
-            "experience_level": self.request.query_params.get("experience_level"),
+            "job_types": job_types,
+            "work_modes": work_modes,
+            "experience_levels": experience_levels,
             "category": self.request.query_params.get("category"),
+            "location": self.request.query_params.get("location"),
+            "salary_min": self.request.query_params.get("salary_min"),
+            "salary_max": self.request.query_params.get("salary_max"),
+            "easy_apply": self.request.query_params.get("easy_apply") == "true",
+            "posted_date": self.request.query_params.get("posted_date"),
         }
         return SearchService.search_jobs(filters)
 

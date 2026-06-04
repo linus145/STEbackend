@@ -90,6 +90,7 @@ class ManualPaymentAdmin(admin.ModelAdmin):
         "user_email",
         "plan",
         "transaction_id",
+        "bank_name",
         "payment_method",
         "payment_type",
         "upgrade_upi_or_phone",
@@ -97,7 +98,7 @@ class ManualPaymentAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("status", "payment_type", "payment_method", "plan")
-    search_fields = ("user__email", "transaction_id", "notes")
+    search_fields = ("user__email", "transaction_id", "bank_name", "notes")
     raw_id_fields = ("user", "subscription", "plan")
     readonly_fields = ("created_at", "updated_at", "screenshot_preview")
     ordering = ("-created_at",)
@@ -135,6 +136,7 @@ class ManualPaymentAdmin(admin.ModelAdmin):
         ("Transaction Details", {
             "fields": (
                 "transaction_id",
+                "bank_name",
                 "payment_method",
                 "payment_type",
                 "upgrade_upi_or_phone",
