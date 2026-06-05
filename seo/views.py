@@ -86,5 +86,9 @@ class PageSEOQueryView(APIView):
                 except Page.DoesNotExist:
                     pass
             
-            return Response({"detail": "SEO settings not found for this path."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "name": normalized_path,
+                "url_path": normalized_path,
+                "seo": None
+            }, status=status.HTTP_200_OK)
 
