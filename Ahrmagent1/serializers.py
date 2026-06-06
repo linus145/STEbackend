@@ -75,4 +75,4 @@ class AgentRunRequestSerializer(serializers.Serializer):
 class AgentChatHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = AgentChatHistory
-        fields = ['id', 'sender', 'text', 'timestamp']
+        fields = ['id', 'sender', 'text', 'timestamp', 'conversation_id']

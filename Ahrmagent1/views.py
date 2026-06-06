@@ -240,14 +240,25 @@ class AgentChatHistoryView(APIView):
     def post(self, request):
         sender = request.data.get('sender')
         text = request.data.get('text')
+        conversation_id = request.data.get('conversation_id')
         
         if not sender or not text:
             return Response({"error": "sender and text are required"}, status=status.HTTP_400_BAD_REQUEST)
             
+        if not conversation_id or conversation_id == "":
+            conversation_id = None
+        else:
+            import uuid
+            try:
+                uuid.UUID(str(conversation_id))
+            except ValueError:
+                conversation_id = None
+
         chat = AgentChatHistory.objects.create(
             user=request.user if request.user.is_authenticated else None,
             sender=sender,
-            text=text
+            text=text,
+            conversation_id=conversation_id
         )
         serializer = AgentChatHistorySerializer(chat)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -258,11 +269,19 @@ class AgentChatHistoryClearView(APIView):
     API View to clear conversational AI chat history.
     """
     def delete(self, request):
-        if request.user.is_authenticated:
-            AgentChatHistory.objects.filter(user=request.user).delete()
+        conversation_id = request.query_params.get('conversation_id')
+        if conversation_id:
+            if request.user.is_authenticated:
+                AgentChatHistory.objects.filter(user=request.user, conversation_id=conversation_id).delete()
+            else:
+                AgentChatHistory.objects.filter(conversation_id=conversation_id).delete()
+            return Response({"status": "success", "message": f"Chat history for conversation {conversation_id} cleared."})
         else:
-            AgentChatHistory.objects.all().delete()
-        return Response({"status": "success", "message": "Chat history cleared."})
+            if request.user.is_authenticated:
+                AgentChatHistory.objects.filter(user=request.user).delete()
+            else:
+                AgentChatHistory.objects.all().delete()
+            return Response({"status": "success", "message": "All chat history cleared."})
 
 
 from Ahrmagent1.models import AgentGoal, AgentMemory, AgentDecision, AgentAction, AgentSchedule, AgentCheckpoint
