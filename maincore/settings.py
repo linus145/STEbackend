@@ -417,18 +417,27 @@ if DEBUG:
     }
 else:
     # Production: Redis configuration for multi-worker support and scalability
+    # CACHES = {
+    #     "default": {
+    #         "BACKEND": "django.core.cache.backends.redis.RedisCache",
+    #         "LOCATION": os.environ.get("REDIS_CACHE_URL", os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")),
+    #         "OPTIONS": {
+    #             "SOCKET_CONNECT_TIMEOUT": 5,
+    #             "SOCKET_TIMEOUT": 5,
+    #             "RETRY_ON_TIMEOUT": True,
+    #             "MAX_CONNECTIONS": 100,
+    #         }
+    #     }
+    # }
     CACHES = {
-        "default": {
-            "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": os.environ.get("REDIS_CACHE_URL", os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")),
-            "OPTIONS": {
-                "SOCKET_CONNECT_TIMEOUT": 5,
-                "SOCKET_TIMEOUT": 5,
-                "RETRY_ON_TIMEOUT": True,
-                "MAX_CONNECTIONS": 100,
-            }
-        }
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.environ.get(
+            "REDIS_CACHE_URL",
+            os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
+        ),
     }
+}
 
 # Structured Logging Configuration for Throttling
 LOGS_DIR = BASE_DIR / "logs"
