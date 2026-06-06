@@ -47,6 +47,14 @@ def handle_employee_sync_on_status_change(sender, instance, created, **kwargs):
             }
             emp_type = type_map.get(instance.employment_type, "FULL_TIME")
 
+            # Clear any stale job_application FK held by other soft-deleted employees
+            # (OneToOneField constraint: only one employee can reference each application)
+            Employee.all_objects.filter(
+                job_application=instance
+            ).exclude(
+                user=applicant
+            ).update(job_application=None)
+
             # 3. Get or Create Employee by User (OneToOneField constraint)
             employee = Employee.all_objects.filter(user=applicant).first()
 
@@ -57,6 +65,9 @@ def handle_employee_sync_on_status_change(sender, instance, created, **kwargs):
                     employee.deleted_at = None
                 employee.status = "ON_BOARDING"
                 employee.job_application = instance
+                # Re-sync tenant fields so the employee appears in the HR tool
+                employee.organization = organization
+                employee.startup = startup
                 employee.save()
                 logger.info(f"Restored/Updated Employee for {applicant.email}")
             else:

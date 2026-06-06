@@ -66,7 +66,7 @@ class ConfigureInterviewView(APIView, ResponseMixin):
             )
 
             # Step 6: Send Invitation
-            InterviewNotifier.notify_candidate_of_invite(session)
+            # InterviewNotifier.notify_candidate_of_invite(session)
 
             from django.conf import settings as django_settings
 
@@ -77,7 +77,7 @@ class ConfigureInterviewView(APIView, ResponseMixin):
 
             return self.build_response(
                 "success",
-                "Interview orchestrated and invite sent.",
+                "Interview orchestrated successfully.",
                 {
                     "session_id": str(session.id),
                     "invite_token": str(session.invite_token),
