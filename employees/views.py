@@ -338,8 +338,11 @@ from useraccounts.services import UserService
 from useraccounts.serializers import UserSerializer
 
 
+from maincore.throttling import LoginBurstThrottle, LoginSustainedThrottle
+
 class EmployeeLoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
 
     def post(self, request, *args, **kwargs):
         username_or_email = request.data.get("email") or request.data.get("username")

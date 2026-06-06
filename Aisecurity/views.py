@@ -2,18 +2,10 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.throttling import UserRateThrottle
+from maincore.throttling import LogViolationThrottle, CodeExecutionThrottle
 from .models import ProctoringSession, ViolationLog
 from AIrounds.models import InterviewSession
 from .serializers import ProctoringSessionSerializer, ViolationLogSerializer
-
-
-class LogViolationThrottle(UserRateThrottle):
-    rate = '60/minute'
-
-
-class CodeExecutionThrottle(UserRateThrottle):
-    rate = '15/minute'
 
 
 class LogViolationView(APIView):

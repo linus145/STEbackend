@@ -111,6 +111,8 @@ class CandidateExamAccessView(APIView, ResponseMixin):
 
 
 
+from maincore.throttling import LoginBurstThrottle, LoginSustainedThrottle
+
 class CandidateExamLoginView(APIView, ResponseMixin):
     """
     Candidate logs in with exam credentials (NOT Django auth).
@@ -118,6 +120,7 @@ class CandidateExamLoginView(APIView, ResponseMixin):
     """
     permission_classes = (AllowAny,)
     authentication_classes = []
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
 
     def post(self, request):
         from AIrounds.models import CandidateInterviewLink

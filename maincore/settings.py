@@ -294,13 +294,22 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ),
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
+        "maincore.throttling.AnonBurstThrottle",
+        "maincore.throttling.AnonSustainedThrottle",
+        "maincore.throttling.UserBurstThrottle",
+        "maincore.throttling.UserSustainedThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "100000/day",
-        "user": "1000/hour",
-        "burst": "60/min",
+        "anon_burst": "30/min",
+        "anon_sustained": "1000/hour",
+        "user_burst": "120/min",
+        "user_sustained": "5000/hour",
+        "login_burst": "5/min",
+        "login_sustained": "100/hour",
+        "otp_request": "5/hour",
+        "otp_verify": "10/hour",
+        "log_violation": "60/min",
+        "code_execution": "15/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
@@ -396,6 +405,66 @@ NOTIFICATION_DEFAULT_FROM_EMAIL = os.environ.get("NOTIFICATION_DEFAULT_FROM_EMAI
 # AI & External APIs
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
+
+# Caching Configuration
+if DEBUG:
+    # Local development fallback
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "ste-local-cache",
+        }
+    }
+else:
+    # Production: Redis configuration for multi-worker support and scalability
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": os.environ.get("REDIS_CACHE_URL", os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")),
+            "OPTIONS": {
+                "SOCKET_CONNECT_TIMEOUT": 5,
+                "SOCKET_TIMEOUT": 5,
+                "RETRY_ON_TIMEOUT": True,
+                "MAX_CONNECTIONS": 100,
+            }
+        }
+    }
+
+# Structured Logging Configuration for Throttling
+LOGS_DIR = BASE_DIR / "logs"
+os.makedirs(LOGS_DIR, exist_ok=True)
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+        "throttling_file": {
+            "level": "WARNING",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(LOGS_DIR / "throttling.log"),
+            "maxBytes": 1024 * 1024 * 5,  # 5 MB
+            "backupCount": 5,
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "throttling": {
+            "handlers": ["console", "throttling_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+}
 
 
 

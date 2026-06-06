@@ -118,8 +118,11 @@ class RegisterView(APIView, RequestResponseMixin):
         )
 
 
+from maincore.throttling import LoginBurstThrottle, LoginSustainedThrottle
+
 class LoginView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
 
     def post(self, request, *args, **kwargs):
         serializer = LoginSerializer(data=request.data)
@@ -497,6 +500,7 @@ class UpdatePhoneNumberView(APIView, RequestResponseMixin):
 @method_decorator(csrf_exempt, name="dispatch")
 class GoogleLoginView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
 
     def post(self, request, *args, **kwargs):
         import logging
@@ -794,13 +798,7 @@ class RecruiterBulkContactView(APIView, RequestResponseMixin):
         )
 
 
-from rest_framework.throttling import AnonRateThrottle
-
-class OTPRequestThrottle(AnonRateThrottle):
-    rate = '5/hour'
-
-class OTPVerifyThrottle(AnonRateThrottle):
-    rate = '10/hour'
+from maincore.throttling import OTPRequestThrottle, OTPVerifyThrottle
 
 class RequestOTPView(APIView, RequestResponseMixin):
     permission_classes = (AllowAny,)

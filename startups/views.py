@@ -43,8 +43,11 @@ class CompanyRegisterView(APIView, ResponseMixin):
         return self.build_response("error", "Validation failed.", serializer.errors, status.HTTP_400_BAD_REQUEST)
 
 
+from maincore.throttling import LoginBurstThrottle, LoginSustainedThrottle
+
 class CompanyLoginView(APIView, ResponseMixin):
     permission_classes = (AllowAny,)
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
 
     def post(self, request):
         serializer = CompanyLoginSerializer(data=request.data)
