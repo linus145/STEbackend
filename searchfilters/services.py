@@ -131,7 +131,7 @@ class SearchService:
         Unified service for searching and filtering a user's job applications.
         """
         queryset = JobApplication.objects.filter(
-            applicant=user, is_deleted=False
+            applicant=user, is_deleted=False, job__is_deleted=False
         ).select_related("job", "job__company")
 
         if not filters:

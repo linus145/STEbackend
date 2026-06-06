@@ -118,7 +118,7 @@ class JobService:
         Optimized stats using single-query aggregation (Task 7).
         """
         jobs_qs = company.job_posts.filter(is_deleted=False)
-        apps_qs = JobApplication.objects.filter(job__company=company, is_deleted=False)
+        apps_qs = JobApplication.objects.filter(job__company=company, is_deleted=False, job__is_deleted=False)
 
         # Combine multiple counts into a single DB hit per table
         job_stats = jobs_qs.aggregate(
@@ -133,6 +133,7 @@ class JobService:
             pending_applications=Count("id", filter=Q(status="PENDING")),
             reviewed=Count("id", filter=Q(status="REVIEWED")),
             shortlisted=Count("id", filter=Q(status="SHORTLISTED")),
+            interview=Count("id", filter=Q(status="INTERVIEW")),
             rejected=Count("id", filter=Q(status="REJECTED")),
             hired=Count("id", filter=Q(status="ONBOARDED")),
         )

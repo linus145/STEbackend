@@ -203,7 +203,8 @@ class JobApplicationsView(ListAPIView, ResponseMixin):
         qs = JobApplication.objects.filter(
             job_id=self.kwargs["job_id"],
             job__company=self.request.user.company_profile,
-            is_deleted=False
+            is_deleted=False,
+            job__is_deleted=False
         ).select_related("applicant")
         status_filter = self.request.query_params.get("status")
         if status_filter:
@@ -252,7 +253,7 @@ class MyApplicationsView(ListAPIView, ResponseMixin):
 
     def get_queryset(self):
         qs = JobApplication.objects.filter(
-            applicant=self.request.user, is_deleted=False
+            applicant=self.request.user, is_deleted=False, job__is_deleted=False
         ).select_related("job", "job__company")
         status_filter = self.request.query_params.get("status")
         if status_filter:

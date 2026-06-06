@@ -208,6 +208,8 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                 InterviewSession.objects.filter(
                     Q(application__job__company=company) &
                     Q(application__job__status__in=["ACTIVE", "DRAFT"]) &
+                    Q(application__is_deleted=False) &
+                    Q(application__job__is_deleted=False) &
                     (Q(application__status="INTERVIEW") | Q(interview_candidate__isnull=False))
                 )
                 .select_related("candidate", "application", "application__job")
@@ -266,7 +268,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
             # 2. Get JobApplications with status='INTERVIEW' that don't have a session yet
             pending_apps = (
                 JobApplication.objects.filter(
-                    job__company=company, job__status__in=["ACTIVE", "DRAFT"], status="INTERVIEW"
+                    job__company=company, job__status__in=["ACTIVE", "DRAFT"], status="INTERVIEW", is_deleted=False, job__is_deleted=False
                 )
                 .exclude(id__in=seen_application_ids)
                 .select_related("applicant", "job")
@@ -498,6 +500,7 @@ class SessionDetailView(APIView, ResponseMixin):
                 "overall_score": session.overall_score,
                 "created_at": session.created_at.isoformat(),
                 "application_id": str(session.application.id) if session.application else None,
+                "application_status": session.application.status if session.application else None,
                 "rounds": rounds_data,
                 "exam_link": exam_info,
             },
