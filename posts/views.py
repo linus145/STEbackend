@@ -58,10 +58,14 @@ class PostCreateView(APIView):
 
 
 class PostDetailView(APIView):
-    permission_classes = (IsAuthenticated,)
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAuthenticated()]
 
     def get(self, request, post_id, *args, **kwargs):
-        post = PostService.get_post_by_id(post_id, current_user=request.user)
+        user = request.user if request.user.is_authenticated else None
+        post = PostService.get_post_by_id(post_id, current_user=user)
         if not post:
             return Response(
                 {"detail": "Post not found."}, status=status.HTTP_404_NOT_FOUND
