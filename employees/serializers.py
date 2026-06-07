@@ -52,6 +52,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     designation_detail = DesignationSerializer(source='designation', read_only=True)
     profile_details = EmployeeProfileSerializer(read_only=True)
     reporting_manager_detail = EmployeeSimpleSerializer(source='reporting_manager', read_only=True)
+    subordinates_count = serializers.SerializerMethodField()
     
     designation = serializers.PrimaryKeyRelatedField(
         queryset=Designation.objects.all(),
@@ -77,7 +78,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'id', 'startup', 'user', 'employee_id', 'first_name', 'last_name', 
             'email', 'phone', 'designation', 'designation_detail', 
             'department', 'department_detail', 'joining_date', 
-            'employment_type', 'reporting_manager', 'reporting_manager_detail', 'salary', 'avatar', 
+            'employment_type', 'reporting_manager', 'reporting_manager_detail', 'subordinates_count', 'salary', 'avatar', 
             'address', 'status', 'role', 'profile_details', 'job_application', 
             'aadhaar_detail', 'pan_detail', 'joining_detail', 'bank_detail',
             'created_at', 'updated_at', 'portal_username', 'portal_password', 'password'
@@ -86,6 +87,9 @@ class EmployeeSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'employee_id': {'required': False, 'allow_blank': True}
         }
+
+    def get_subordinates_count(self, obj):
+        return obj.subordinates.filter(is_deleted=False, status='ACTIVE').count()
 
     def create(self, validated_data):
         aadhaar_data = validated_data.pop('aadhaar_detail', None)

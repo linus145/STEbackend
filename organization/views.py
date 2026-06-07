@@ -227,7 +227,7 @@ class DepartmentViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             # Re-fetch after seeding
             qs = super().get_queryset()
 
-        return qs.annotate(employee_count=Count("employees", filter=Q(employees__is_deleted=False)))
+        return qs.annotate(employee_count=Count("employees", filter=Q(employees__is_deleted=False, employees__status='ACTIVE')))
 
 
 class DesignationViewSet(StartupTenantMixin, viewsets.ModelViewSet):
@@ -304,7 +304,7 @@ class DesignationViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             # Re-fetch after seeding
             qs = super().get_queryset()
 
-        return qs.annotate(employee_count=Count("employees", filter=Q(employees__is_deleted=False)))
+        return qs.annotate(employee_count=Count("employees", filter=Q(employees__is_deleted=False, employees__status='ACTIVE')))
 
 
 from subscription.utils import HasHRToolkitPermission

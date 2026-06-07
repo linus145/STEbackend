@@ -128,3 +128,111 @@ def task_send_interview_invite(session_id):
         except Exception as ex:
             logger.error(f"Failed to transition session to FAILED in task_send_interview_invite: {ex}")
         raise e
+
+
+@shared_task(bind=True)
+def task_bulk_evaluate(self, job_id, company_owner_id):
+    """
+    Celery task to bulk-evaluate all unanswered questions for a given job role.
+    Reports progress via self.update_state so the frontend can poll TaskStatusView.
+    """
+    try:
+        from startups.models import CompanyProfile
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+
+        owner = User.objects.get(id=company_owner_id)
+        company = CompanyProfile.objects.get(owner=owner)
+
+        sessions = (
+            InterviewSession.objects.filter(
+                application__job__id=job_id,
+                application__job__company=company,
+                application__is_deleted=False,
+            )
+            .select_related("candidate")
+            .prefetch_related("rounds__questions")
+            .order_by("-created_at")
+        )
+
+        # Build manifest of questions to evaluate
+        manifest = []
+        for session in sessions:
+            for rnd in session.rounds.all():
+                for q in rnd.questions.all():
+                    if q.candidate_answer:
+                        manifest.append({
+                            "session_id": str(session.id),
+                            "round_id": str(rnd.id),
+                            "question_id": str(q.id),
+                            "answer_text": q.candidate_answer,
+                            "candidate_name": f"{session.candidate.first_name} {session.candidate.last_name}",
+                        })
+
+        total = len(manifest)
+        if total == 0:
+            return {"status": "completed", "evaluated": 0, "total": 0, "message": "All candidates already evaluated."}
+
+        # Evaluate each question
+        evaluated = 0
+        session_ids_done = set()
+
+        for item in manifest:
+            try:
+                InterviewEvaluationService.evaluate_answer(
+                    item["session_id"], item["round_id"], item["question_id"], item["answer_text"]
+                )
+            except Exception as e:
+                logger.error(f"Bulk eval: failed question {item['question_id']}: {e}")
+
+            evaluated += 1
+            session_ids_done.add(item["session_id"])
+
+            # Report progress
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": evaluated,
+                    "total": total,
+                    "candidate_name": item["candidate_name"],
+                    "percent": round((evaluated / total) * 100),
+                },
+            )
+
+        # Aggregate scores for each session
+        for sid in session_ids_done:
+            try:
+                session = InterviewSession.objects.prefetch_related("rounds__questions").get(id=sid)
+                total_score = 0
+                total_max = 0
+                unevaluated = 0
+                for rnd in session.rounds.all():
+                    round_score = 0
+                    for q in rnd.questions.all():
+                        if q.evaluation and isinstance(q.evaluation, dict):
+                            round_score += q.evaluation.get("score", 0)
+                            total_score += q.evaluation.get("score", 0)
+                        elif q.candidate_answer:
+                            unevaluated += 1
+                        total_max += q.marks
+                    rnd.round_score = round_score
+                    rnd.save(update_fields=["round_score"])
+                session.overall_score = total_score
+                if unevaluated == 0 and total_max > 0:
+                    session.status = "COMPLETED"
+                session.save(update_fields=["overall_score", "status"])
+            except Exception as e:
+                logger.error(f"Bulk eval: failed aggregation for session {sid}: {e}")
+
+        return {
+            "status": "completed",
+            "evaluated": evaluated,
+            "total": total,
+            "sessions_count": len(session_ids_done),
+            "message": f"Evaluated {evaluated} questions across {len(session_ids_done)} sessions.",
+        }
+
+    except Exception as e:
+        logger.error(f"Error in task_bulk_evaluate: {e}")
+        raise e
+

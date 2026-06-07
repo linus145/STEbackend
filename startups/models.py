@@ -42,6 +42,7 @@ class CompanyProfile(SoftDeleteModel):
     website = models.URLField(max_length=255, blank=True)
     founded_year = models.PositiveIntegerField(null=True, blank=True)
     location = models.CharField(max_length=200, blank=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
     is_approved = models.BooleanField(default=False)
     is_genuine = models.BooleanField(default=False)
 

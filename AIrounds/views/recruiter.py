@@ -179,9 +179,18 @@ class TaskStatusView(APIView, ResponseMixin):
             "status": result.status,
         }
         
-        if result.ready():
+        # Report custom progress from tasks using self.update_state
+        if result.status == "PROGRESS" and isinstance(result.info, dict):
+            response_data.update(result.info)
+        elif result.ready():
             if result.successful():
-                response_data["questions"] = result.result
+                task_result = result.result
+                if isinstance(task_result, dict):
+                    response_data.update(task_result)
+                elif isinstance(task_result, list):
+                    response_data["questions"] = task_result
+                else:
+                    response_data["result"] = task_result
             else:
                 return self.build_response("error", str(result.result), response_data, status.HTTP_500_INTERNAL_SERVER_ERROR)
                 
@@ -889,3 +898,53 @@ class ResendInviteView(APIView, ResponseMixin):
             return self.build_response(
                 "error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class BulkEvaluateView(APIView, ResponseMixin):
+    """
+    Kicks off a Celery task that bulk-evaluates all unanswered questions
+    for every candidate in a given job role.
+    POST /AIrounds/bulk-evaluate/  { "job_id": "<uuid>" }
+    Returns a task_id the frontend polls via TaskStatusView.
+    """
+
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
+
+    def post(self, request):
+        from startups.models import CompanyProfile
+
+        job_id = request.data.get("job_id")
+        if not job_id:
+            return self.build_response(
+                "error", "job_id is required.", {}, status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            from AIrounds.tasks import task_bulk_evaluate
+
+            celery_task = task_bulk_evaluate.delay(
+                str(job_id), str(request.user.id)
+            )
+
+            return self.build_response(
+                "success",
+                "Bulk evaluation started.",
+                {
+                    "task_id": celery_task.id,
+                    "status": "processing",
+                },
+                status_code=status.HTTP_202_ACCEPTED,
+            )
+        except Exception as e:
+            return self.build_response(
+                "error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+

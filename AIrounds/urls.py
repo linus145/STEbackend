@@ -24,6 +24,7 @@ from AIrounds.views import (
     DeleteInterviewSessionView,
     TaskStatusView,
     ResendInviteView,
+    BulkEvaluateView,
 )
 
 urlpatterns = [
@@ -54,4 +55,5 @@ urlpatterns = [
     path('question/<uuid:question_id>/evaluate/', EvaluateQuestionView.as_view(), name='evaluate_question'),
     path('session/<str:session_id>/delete/', DeleteInterviewSessionView.as_view(), name='delete_session'),
     path('session/<uuid:session_id>/resend-invite/', ResendInviteView.as_view(), name='resend_invite'),
+    path('bulk-evaluate/', BulkEvaluateView.as_view(), name='bulk_evaluate'),
 ]
