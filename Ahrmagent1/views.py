@@ -6,24 +6,47 @@ from Ahrmagent1.serializers import AgentRunRequestSerializer, AgentExecutionSeri
 from Ahrmagent1.services.execution_agent import ExecutionAgentService
 from Ahrmagent1.services.autonomous_agent import AutonomousAgentService
 from Ahrmagent1.models import AgentExecution
+from creditsystem.utils import burn_credits
 
 
 class AgentRunView(APIView):
     """
     API View to trigger a recruitment agent execution.
     """
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
         serializer = AgentRunRequestSerializer(data=request.data)
         if serializer.is_valid():
             task_type = serializer.validated_data.get('task_type')
             
+            # Check and burn credits
+            job_id = serializer.validated_data.get('job_id')
             if task_type == 'full_hiring_workflow':
+                burn_credits(
+                    request.user, 
+                    150, 
+                    "Executed full hiring workflow autonomous agent.",
+                    module="autonomous_agent",
+                    job_id=str(job_id) if job_id else None,
+                    action_type="full_hiring_workflow"
+                )
                 execution = ExecutionAgentService.run_hiring_workflow(
                     serializer.validated_data,
                     recruiter_user_id=request.user.id if request.user.is_authenticated else None
                 )
             else:
                 handover = serializer.validated_data.get('handover', False)
+                desc = "Executed recruitment agent (handover mode)." if handover else "Executed recruitment agent."
+                action_name = "recruitment_agent_handover" if handover else "recruitment_agent"
+                burn_credits(
+                    request.user, 
+                    10, 
+                    desc,
+                    module="autonomous_agent",
+                    job_id=str(job_id) if job_id else None,
+                    action_type=action_name
+                )
                 execution = ExecutionAgentService.run_recruitment_agent(
                     serializer.validated_data, 
                     handover=handover
@@ -125,6 +148,33 @@ class LLMThinkView(APIView):
                     "thinking": "No active subscription found. Enterprise plan required.",
                     "description": "Subscription verification failed.",
                     "error": "No active subscription. Enterprise plan required.",
+                },
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        # Burn credits for autonomous think step
+        goal = request.data.get("goal", "")
+        iteration = request.data.get("iteration", 1)
+        try:
+            burn_credits(
+                request.user, 
+                0.1, 
+                f"Autonomous Agent cognitive step for goal: {goal[:60]}",
+                module="browser_agent",
+                action_type="cognitive_step",
+                metadata={
+                    "goal": goal,
+                    "iteration": iteration
+                }
+            )
+        except Exception as e:
+            return Response(
+                {
+                    "action_type": "wait",
+                    "wait_after_ms": 5000,
+                    "thinking": f"Credit verification failed: {str(e)}",
+                    "description": "Failed to verify or burn credits.",
+                    "error": str(e),
                 },
                 status=status.HTTP_403_FORBIDDEN
             )

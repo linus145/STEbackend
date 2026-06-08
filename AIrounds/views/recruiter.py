@@ -137,6 +137,26 @@ class GenerateQuestionPoolView(APIView, ResponseMixin):
                 "error", "Job Application not found or unauthorized.", {}, status.HTTP_404_NOT_FOUND
             )
 
+        # Check and burn credits
+        try:
+            from creditsystem.utils import burn_credits
+            candidate_id = str(application.applicant.id) if getattr(application, 'applicant', None) else None
+            job_id = str(application.job.id) if getattr(application, 'job', None) else None
+            burn_credits(
+                request.user, 
+                2 * count, 
+                f"AI generation of {count} questions for designation {designation}",
+                module="interview_questions",
+                candidate_id=candidate_id,
+                job_id=job_id,
+                action_type="generate_questions",
+                metadata={"count": count, "round_type": round_type, "designation": designation}
+            )
+        except Exception as e:
+            return self.build_response(
+                "error", f"Credit verification failed: {str(e)}", {}, status.HTTP_403_FORBIDDEN
+            )
+
         try:
             from AIrounds.tasks import task_generate_question_pool
 
@@ -594,6 +614,26 @@ class RegenerateRoundQuestionsView(APIView, ResponseMixin):
 
         count = request.data.get("count", rnd.max_questions or 5)
 
+        # Check and burn credits
+        try:
+            from creditsystem.utils import burn_credits
+            candidate_id = str(session.candidate.id) if getattr(session, 'candidate', None) else None
+            job_id = str(session.application.job.id) if (getattr(session, 'application', None) and getattr(session.application, 'job', None)) else None
+            burn_credits(
+                request.user, 
+                2 * count, 
+                f"AI regeneration of {count} questions for round {rnd.designation}",
+                module="interview_questions",
+                candidate_id=candidate_id,
+                job_id=job_id,
+                action_type="regenerate_questions",
+                metadata={"count": count, "round_id": str(rnd.id)}
+            )
+        except Exception as e:
+            return self.build_response(
+                "error", f"Credit verification failed: {str(e)}", {}, status.HTTP_403_FORBIDDEN
+            )
+
         try:
             from AIrounds.tasks import task_regenerate_round_questions
 
@@ -745,6 +785,27 @@ class EvaluateQuestionView(APIView, ResponseMixin):
                     "evaluation": question.evaluation,
                     "already_evaluated": True,
                 },
+            )
+
+        # Check and burn credits
+        try:
+            from creditsystem.utils import burn_credits
+            cand_id = str(session.candidate.id) if getattr(session, 'candidate', None) else None
+            job_id = str(session.application.job.id) if (getattr(session, 'application', None) and getattr(session.application, 'job', None)) else None
+            burn_credits(
+                request.user, 
+                1, 
+                f"AI evaluation of candidate answer for question: {question.question_text[:60]}",
+                module="interview_evaluation",
+                candidate_id=cand_id,
+                interview_id=str(session.id),
+                job_id=job_id,
+                action_type="evaluate_question",
+                metadata={"question_id": str(question.id)}
+            )
+        except Exception as e:
+            return self.build_response(
+                "error", f"Credit verification failed: {str(e)}", {}, status.HTTP_403_FORBIDDEN
             )
 
         try:

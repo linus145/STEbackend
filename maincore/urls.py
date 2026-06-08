@@ -33,8 +33,7 @@ def get_app_list(self, request, app_label=None):
     # HR related apps to aggregate
     hr_app_labels = [
         "employees", "attendance", "leave_management", 
-        "organization",
-        "AIAgents", "Ahrmagent1", "Ahrmagent2"
+        "organization"
     ]
     
     hr_models = []
@@ -65,10 +64,42 @@ def get_app_list(self, request, app_label=None):
         hr_app_entry["models"] = sorted(unique_models, key=lambda x: x["name"])
         app_dict["hr_tool"] = hr_app_entry
 
+    # AI Agent related apps to aggregate
+    agent_app_labels = [
+        "AIAgents", "Ahrmagent1", "Ahrmagent2", "agentsettings"
+    ]
+    
+    agent_models = []
+    agent_app_entry = None
+    
+    # Collect all models from Agent apps and remove them from original dict
+    for label in agent_app_labels:
+        if label in app_dict:
+            app = app_dict.pop(label)
+            agent_models.extend(app["models"])
+            if not agent_app_entry:
+                agent_app_entry = app.copy()
+                
+    # Create the aggregated AI Agent entry
+    if agent_app_entry:
+        agent_app_entry["name"] = "AI Agent"
+        agent_app_entry["app_label"] = "ai_agent"
+        # Sort models by name and remove duplicates
+        seen_models = set()
+        unique_models = []
+        for model in agent_models:
+            model_key = f"{model.get('object_name')}"
+            if model_key not in seen_models:
+                unique_models.append(model)
+                seen_models.add(model_key)
+        
+        agent_app_entry["models"] = sorted(unique_models, key=lambda x: x["name"])
+        app_dict["ai_agent"] = agent_app_entry
+
     app_list = sorted(app_dict.values(), key=lambda x: x["name"].lower())
 
     # Custom priority order
-    priority_apps = ["useraccounts", "hr_tool", "performance", "payroll", "posts", "notifications", "comments"]
+    priority_apps = ["useraccounts", "creditsystem", "hr_tool", "ai_agent", "performance", "payroll", "posts", "notifications", "comments"]
 
     sorted_app_list = []
     # Add priority apps first
@@ -256,6 +287,7 @@ urlpatterns = [
     path("api/api/payroll/", include("payroll.urls")),
     path("api/performance/", include("performance.urls")),
     path("api/search/", include("searchfilters.urls")),
+    path("api/credits/", include("creditsystem.urls")),
     
     # Health checks
     path("api/health/", liveness_check, name="liveness-check"),

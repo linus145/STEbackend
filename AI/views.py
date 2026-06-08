@@ -214,6 +214,27 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         if model not in allowed_models:
             model = "gemini-2.5-flash-lite"
 
+        # Check and burn credits
+        credits_to_burn = len(applications)
+        try:
+            from creditsystem.utils import burn_credits
+            burn_credits(
+                request.user, 
+                credits_to_burn, 
+                f"AI resume screening for {credits_to_burn} candidates on job: {job.title}",
+                module="resume_screening",
+                job_id=str(job.id),
+                action_type="bulk_resume_screening",
+                metadata={
+                    "candidates_count": credits_to_burn,
+                    "application_ids": [str(aid) for aid in app_ids]
+                }
+            )
+        except Exception as e:
+            return self.build_response(
+                "error", f"Credit verification failed: {str(e)}", {}, status.HTTP_403_FORBIDDEN
+            )
+
         # 4. Create Processing Report
         report = AIScreeningReport.objects.create(
             job_id=job.id,
@@ -288,6 +309,12 @@ class AIPlanChatView(APIView, ResponseMixin):
 
         if not user_message:
             return self.build_response("error", "Message is required.", {}, status.HTTP_400_BAD_REQUEST)
+
+        candidate_context = request.data.get("candidate_context", None)
+        candidate_id = None
+        if candidate_context and isinstance(candidate_context, dict):
+            candidate_id = candidate_context.get("id")
+
 
         # 1. Prompt Injection Protection & Input Sanitization
         injection_keywords = [
