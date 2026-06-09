@@ -90,6 +90,19 @@ def get_active_startup(request):
     return None
 
 
+def _get_employee_q_for_startup(startup, prefix=''):
+    """
+    Returns a Q filter that matches employees belonging to the given startup,
+    either via the direct startup FK or via the organization linked to the startup.
+    Use prefix='employee__' when filtering from a related model (Payslip, PayrollRecord).
+    """
+    from organization.models import Organization
+    org = Organization.objects.filter(startup=startup).first()
+    if org:
+        return Q(**{f'{prefix}startup': startup}) | Q(**{f'{prefix}organization': org})
+    return Q(**{f'{prefix}startup': startup})
+
+
 class AllowanceViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = Allowance.objects.all()
@@ -443,7 +456,8 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        records = PayrollRecord.objects.filter(employee__startup=startup)
+        emp_q = _get_employee_q_for_startup(startup, prefix='employee__')
+        records = PayrollRecord.objects.filter(emp_q).filter(employee__status='ACTIVE')
 
         total_payouts = (
             records.filter(status="APPROVED").aggregate(Sum("net_salary"))[
@@ -508,7 +522,7 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         return Response(PayrollRecordSerializer(records, many=True).data)
 
 
-class PayslipViewSet(viewsets.ReadOnlyModelViewSet):
+class PayslipViewSet(viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated, HasHRToolkitPermission)
     queryset = Payslip.objects.select_related("employee", "payroll").all()
     serializer_class = PayslipSerializer
@@ -524,7 +538,8 @@ class PayslipViewSet(viewsets.ReadOnlyModelViewSet):
         if not startup:
             return Payslip.objects.none()
 
-        base_qs = self.queryset.filter(employee__startup=startup)
+        emp_q = _get_employee_q_for_startup(startup, prefix='employee__')
+        base_qs = self.queryset.filter(emp_q)
 
         # Security: Employees can only access their own payslips
         is_admin_or_hr = (
@@ -639,6 +654,17 @@ class PayslipViewSet(viewsets.ReadOnlyModelViewSet):
             count += 1
         return Response({"message": f"Bulk sending process started for {count} payslips."})
 
+    def destroy(self, request, *args, **kwargs):
+        """
+        Permanently hard-deletes a single payslip and its associated payroll record.
+        """
+        instance = self.get_object()
+        record = instance.payroll_record
+        instance.hard_delete()
+        if record:
+            record.hard_delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class PayrollDashboardViewSet(viewsets.ViewSet):
     permission_classes = (IsAuthenticated, HasHRToolkitPermission)
@@ -650,7 +676,8 @@ class PayrollDashboardViewSet(viewsets.ViewSet):
                 {"error": "No active startup context."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        records = PayrollRecord.objects.filter(employee__startup=startup)
+        emp_q = _get_employee_q_for_startup(startup, prefix='employee__')
+        records = PayrollRecord.objects.filter(emp_q).filter(employee__status='ACTIVE')
 
         total_payouts = (
             records.filter(status="APPROVED").aggregate(Sum("net_salary"))[
@@ -724,7 +751,8 @@ class PayrollReportsViewSet(viewsets.ViewSet):
         startup = get_active_startup(request)
         if not startup:
             return Response({"departments": [], "active_employees": 0})
-        employees = Employee.objects.filter(startup=startup).select_related('department')
+        emp_q = _get_employee_q_for_startup(startup)
+        employees = Employee.objects.filter(emp_q).select_related('department')
         
         dept_map = {}
         for emp in employees:

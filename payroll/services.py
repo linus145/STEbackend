@@ -2,7 +2,7 @@ import datetime
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
-from django.db.models import Sum
+from django.db.models import Sum, Q
 from payroll.models import (
     Payroll, PayrollRecord, Payslip, SalaryStructure,
     Reimbursement, PayrollAdjustment, TaxConfiguration
@@ -196,8 +196,16 @@ class PayrollGenerationService:
         if payroll.status not in ['DRAFT', 'REJECTED']:
             raise ValueError("Payroll is already processed or locked.")
 
-        # 2. Get active employees in startup
-        employees = Employee.objects.filter(startup=startup, status='ACTIVE')
+        # 2. Get active employees in startup (direct FK or via organization)
+        from organization.models import Organization
+        org = Organization.objects.filter(startup=startup).first()
+        if org:
+            employees = Employee.objects.filter(
+                Q(startup=startup) | Q(organization=org),
+                status='ACTIVE'
+            ).distinct()
+        else:
+            employees = Employee.objects.filter(startup=startup, status='ACTIVE')
         generated_count = 0
 
         for emp in employees:
@@ -279,8 +287,14 @@ class PayrollApprovalService:
             PayslipGenerationService.async_generate_payslip_pdf(ps)
 
         # Mark paid reimbursements
+        from organization.models import Organization
+        org = Organization.objects.filter(startup=payroll.startup).first()
+        if org:
+            reimb_q = Q(employee__startup=payroll.startup) | Q(employee__organization=org)
+        else:
+            reimb_q = Q(employee__startup=payroll.startup)
         Reimbursement.objects.filter(
-            employee__startup=payroll.startup,
+            reimb_q,
             approval_status='APPROVED',
             created_at__year=payroll.year,
             created_at__month=payroll.month
