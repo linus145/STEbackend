@@ -131,8 +131,10 @@ class PayrollCalculationService:
         
         # Payroll Adjustments
         adjustments = PayrollAdjustment.objects.filter(
-            employee=employee,
-            payroll_cycle=payroll_cycle
+            employee=employee
+        ).filter(
+            Q(payroll_cycle=payroll_cycle) |
+            Q(payroll_cycle__isnull=True)
         )
         bonus_amt = adjustments.filter(type='EARNING').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
         deductions_adj_amt = adjustments.filter(type='DEDUCTION').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
@@ -209,6 +211,12 @@ class PayrollGenerationService:
         generated_count = 0
 
         for emp in employees:
+            # Link unlinked adjustments of this employee to the payroll cycle
+            PayrollAdjustment.objects.filter(
+                employee=emp,
+                payroll_cycle__isnull=True
+            ).update(payroll_cycle=payroll)
+
             calc_data = PayrollCalculationService.calculate_employee_payroll(emp, payroll)
             if not calc_data:
                 continue
