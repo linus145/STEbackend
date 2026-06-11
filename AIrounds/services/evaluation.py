@@ -206,8 +206,11 @@ class InterviewEvaluationService:
                 question, round_obj, answer_text, normalized_type
             )
 
+        company = session.application.job.company if (session.application and session.application.job) else None
+        model_name = AIBaseService.get_model_for_company(company)
+
         return InterviewEvaluationService._evaluate_with_ai(
-            session, round_obj, question, answer_text, normalized_type
+            session, round_obj, question, answer_text, normalized_type, model_name=model_name
         )
 
     # ──────────────────────────────────────────────
@@ -223,10 +226,33 @@ class InterviewEvaluationService:
         context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
         prompt = f"The round is complete. Generate a FINAL_ROUND_SUMMARY based on the context.\n\nCONTEXT:\n{context}"
 
+        company = session.application.job.company if (session.application and session.application.job) else None
+        model_name = AIBaseService.get_model_for_company(company)
+        is_gemini = model_name not in ("kimi", "Kimi-K2.6", "grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning", "grok-4-1-fast-non-reasoning", "grok-4.1-non-reasoning")
+        
+        if not is_gemini:
+            prompt += (
+                "\n\nYou must return a JSON object exactly matching this structure:\n"
+                "{\n"
+                '  "type": "FINAL_ROUND_SUMMARY",\n'
+                '  "round_type": "...",\n'
+                '  "overall_score": 0,\n'
+                '  "technical_depth": "...",\n'
+                '  "communication_assessment": "...",\n'
+                '  "problem_solving_assessment": "...",\n'
+                '  "strengths": [],\n'
+                '  "weaknesses": [],\n'
+                '  "risk_indicators": [],\n'
+                '  "recommended_decision": "...",\n'
+                '  "interview_summary": "..."\n'
+                "}\n"
+            )
+
         response_text = AIBaseService.generate_content(
             prompt=prompt,
             system_instruction=InterviewPromptService.get_system_prompt(),
-            temperature=0.3
+            temperature=0.3,
+            model_name=model_name
         )
 
         try:
@@ -372,7 +398,7 @@ class InterviewEvaluationService:
     # ──────────────────────────────────────────────
 
     @staticmethod
-    def _evaluate_with_ai(session, round_obj, question, answer_text, normalized_type):
+    def _evaluate_with_ai(session, round_obj, question, answer_text, normalized_type, model_name=None):
         """Evaluates TEXT, CODE, or VIDEO answers using AI (Gemini)."""
 
         previous_questions = InterviewQuestion.objects.filter(round=round_obj).order_by('asked_at')
@@ -387,6 +413,10 @@ class InterviewEvaluationService:
         previous_conversation = context
         skills_verified = _safe_parse_skills(session.candidate_skills)
         current_topic = question.question_text
+
+        if not model_name:
+            company = session.application.job.company if (session.application and session.application.job) else None
+            model_name = AIBaseService.get_model_for_company(company)
 
         prompt = f"""Evaluate the candidate's answer using the Enterprise AI Interview Evaluation Engine specifications.
 
@@ -442,11 +472,47 @@ STRICT SCHEMATIC FIELD ALIGNMENT RULES:
 - Ensure all other schema fields (red_flags, verified_skills, weaknesses, next_question, hire_decision, overall_score, technical_score, etc.) are strictly populated according to the schema!
 """
 
+        is_gemini = model_name not in ("kimi", "Kimi-K2.6", "grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning", "grok-4-1-fast-non-reasoning", "grok-4.1-non-reasoning")
+        if not is_gemini:
+            prompt += (
+                "\n\nYou must return a JSON object exactly matching this structure:\n"
+                "{\n"
+                '  "score": 0, \n'
+                '  "feedback": "...", \n'
+                '  "key_points_missed": [], \n'
+                '  "round_type": "...", \n'
+                '  "technical_score": 0, \n'
+                '  "communication_score": 0, \n'
+                '  "problem_solving_score": 0, \n'
+                '  "confidence_score": 0, \n'
+                '  "architecture_score": 0, \n'
+                '  "security_score": 0, \n'
+                '  "behavioral_score": 0, \n'
+                '  "overall_score": 0, \n'
+                '  "candidate_level_detected": "...", \n'
+                '  "topic_mastery": "...", \n'
+                '  "strengths": [], \n'
+                '  "weaknesses": [], \n'
+                '  "verified_skills": [], \n'
+                '  "missing_skills": [], \n'
+                '  "red_flags": [], \n'
+                '  "cheating_probability": 0, \n'
+                '  "ai_generated_probability": 0, \n'
+                '  "improvement_areas": [], \n'
+                '  "follow_up_reason": "...", \n'
+                '  "next_question": "...", \n'
+                '  "final_recommendation": "...", \n'
+                '  "hire_decision": "HIRE", \n'
+                '  "confidence_summary": "..."\n'
+                "}\n"
+            )
+
         response_text = AIBaseService.generate_content(
             prompt=prompt,
             system_instruction=AI_EVALUATION_SYSTEM_INSTRUCTION,
             temperature=0.3,
             response_schema=AnswerEvaluation,
+            model_name=model_name
         )
 
         try:

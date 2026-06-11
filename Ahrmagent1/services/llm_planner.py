@@ -370,12 +370,38 @@ class LLMVisionPlanner:
     """
 
     def __init__(self):
-        api_key = os.environ.get("GEMINI_API_KEY") or getattr(
-            settings, "GEMINI_API_KEY", ""
-        )
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY is not set.")
-        self.client = genai.Client(api_key=api_key)
+        self.client = None
+
+    def _call_llm(self, model_name: str, prompt: str) -> str:
+        if model_name in ("kimi", "Kimi-K2.6"):
+            from AI.services import AIService
+            return AIService.call_kimi_api(prompt)
+        elif model_name in ("grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning"):
+            from AI.services import AIService
+            return AIService.call_grok_api(prompt)
+        elif model_name in ("grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"):
+            from AI.services import AIService
+            return AIService.call_grok_4_1_api(prompt)
+        else:
+            # Default/Gemini
+            if not self.client:
+                api_key = os.environ.get("GEMINI_API_KEY") or getattr(
+                    settings, "GEMINI_API_KEY", ""
+                )
+                if not api_key:
+                    raise ValueError("GEMINI_API_KEY is not set.")
+                self.client = genai.Client(api_key=api_key)
+            
+            gemini_model = model_name if model_name in ("gemini-2.5-flash", "gemini-2.5-flash-lite") else "gemini-2.5-flash"
+            response = self.client.models.generate_content(
+                model=gemini_model,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                ),
+            )
+            return response.text
 
     def think(
         self,
@@ -385,6 +411,7 @@ class LLMVisionPlanner:
         iteration: int = 1,
         user_response: str = None,
         original_goal: str = None,
+        model_name: str = "gemini-2.5-flash",
     ) -> Dict:
         """
         Analyze the current page state and decide the next action.
@@ -396,9 +423,7 @@ class LLMVisionPlanner:
             iteration: Current iteration number
             user_response: User's answer if agent previously asked a question
             original_goal: The very first goal given by the user
-
-        Returns:
-            Dict with action details: {action_type, selector, value, wait_after_ms, description, thinking}
+            model_name: The target LLM model name
         """
         # Deterministic shortcut: if the user selected "Task Completed" or "Task Incompleted"
         # from the ask_user options, we can resolve immediately without an LLM call.
@@ -586,16 +611,9 @@ UUID EXCLUSION CONSTRAINT (CRITICAL):
 """
 
         try:
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.1,
-                ),
-            )
-
-            result_text = response.text.strip()
+            result_text = self._call_llm(model_name, prompt).strip()
+            from AI.parsers import strip_markdown_fences
+            result_text = strip_markdown_fences(result_text)
             result = json.loads(result_text)
 
             # Validate the response has required fields
@@ -607,10 +625,10 @@ UUID EXCLUSION CONSTRAINT (CRITICAL):
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"Gemini returned invalid JSON: {e}")
+            logger.error(f"LLM returned invalid JSON: {e}")
             # Try to extract JSON from response
             try:
-                json_match = re.search(r"\{.*\}", response.text, re.DOTALL)
+                json_match = re.search(r"\{.*\}", result_text, re.DOTALL)
                 if json_match:
                     return json.loads(json_match.group())
             except Exception:
@@ -622,7 +640,7 @@ UUID EXCLUSION CONSTRAINT (CRITICAL):
                 "description": "Retrying after parse error",
             }
         except Exception as e:
-            logger.error(f"Gemini API call failed: {e}")
+            logger.error(f"LLM API call failed: {e}")
             return {
                 "action_type": "wait",
                 "wait_after_ms": 3000,

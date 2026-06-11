@@ -7,13 +7,13 @@ from AIrounds.services.evaluation import InterviewEvaluationService
 logger = logging.getLogger("ai_rounds.tasks")
 
 @shared_task
-def task_generate_question_pool(application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count, coding_topics=None, coding_frameworks=None):
+def task_generate_question_pool(application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count, coding_topics=None, coding_frameworks=None, model_name=None):
     """
     Celery task to generate a pool of interview questions.
     """
     try:
         questions = InterviewEngineService.generate_question_pool(
-            application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count, coding_topics, coding_frameworks
+            application_id, round_type, designation, difficulty, round_category, question_format, programming_language, count, coding_topics, coding_frameworks, model_name=model_name
         )
         return questions
     except Exception as e:

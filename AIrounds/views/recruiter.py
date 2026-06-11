@@ -24,6 +24,7 @@ class ConfigureInterviewView(APIView, ResponseMixin):
         rounds_config = request.data.get("rounds") or request.data.get(
             "rounds_config", []
         )
+        force = request.data.get("force", False)
 
         if not application_id or not rounds_config:
             return self.build_response(
@@ -51,6 +52,27 @@ class ConfigureInterviewView(APIView, ResponseMixin):
             )
 
         try:
+            # Smart session cleanup based on status
+            existing_sessions = InterviewSession.objects.filter(application=application)
+            if existing_sessions.exists():
+                active_statuses = {'ACTIVE', 'EVALUATING', 'COMPLETED'}
+                in_use_session = existing_sessions.filter(status__in=active_statuses).first()
+
+                if in_use_session and not force:
+                    return self.build_response(
+                        "error",
+                        "This candidate already has an active/completed exam session. Use force=true to replace it.",
+                        {
+                            "code": "SESSION_IN_USE",
+                            "existing_session_id": str(in_use_session.id),
+                            "existing_status": in_use_session.status,
+                        },
+                        status.HTTP_409_CONFLICT,
+                    )
+
+                # Safe to delete — either PENDING sessions or force=true
+                existing_sessions.delete()
+
             session, rounds = InterviewOrchestrator.create_interview_from_config(
                 application_id, overall_config, rounds_config
             )
@@ -263,6 +285,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                 # Get exam link credentials if available
                 exam_creds = None
                 exam_link_url = None
+                exam_status = "NOT_STARTED"
                 try:
                     active_link = s.active_link
                     exam_creds = {
@@ -270,6 +293,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                         "password": active_link.exam_password,
                     }
                     exam_link_url = f"/interview/exam"
+                    exam_status = active_link.status  # ACTIVE, STARTED, COMPLETED, EXPIRED
                 except Exception:
                     pass
 
@@ -290,6 +314,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                         "is_orchestrated": True,
                         "exam_credentials": exam_creds,
                         "exam_link_url": exam_link_url,
+                        "exam_status": exam_status,
                         "application_status": s.application.status if s.application else None,
                     }
                 )
@@ -318,6 +343,7 @@ class RecruiterSessionListView(APIView, ResponseMixin):
                         "rounds_count": 0,
                         "application_id": str(app.id),
                         "is_orchestrated": False,
+                        "exam_status": None,
                         "application_status": app.status,
                     }
                 )
@@ -474,6 +500,7 @@ class SessionDetailView(APIView, ResponseMixin):
                         "ideal_answer": q.ideal_answer,
                         "question_type": q.question_type,
                         "mcq_options": q.mcq_options,
+                        "marks": q.marks,
                         "candidate_answer": q.candidate_answer,
                         "answered_at": q.answered_at.isoformat()
                         if q.answered_at
@@ -493,6 +520,7 @@ class SessionDetailView(APIView, ResponseMixin):
                     "programming_language": rnd.programming_language,
                     "timer_seconds": rnd.timer_seconds,
                     "max_questions": rnd.max_questions,
+                    "settings": rnd.settings,
                     "status": rnd.status,
                     "questions": questions,
                 }

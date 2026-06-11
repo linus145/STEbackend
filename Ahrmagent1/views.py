@@ -99,7 +99,7 @@ class AgentPlanView(APIView):
 
     def post(self, request):
         goal_data = request.data
-        plan = AutonomousAgentService.generate_plan(goal_data)
+        plan = AutonomousAgentService.generate_plan(goal_data, user=request.user)
         return Response({"plan": plan}, status=status.HTTP_200_OK)
 
 
@@ -194,6 +194,28 @@ class LLMThinkView(APIView):
 
         try:
             from Ahrmagent1.services.llm_planner import get_planner
+            from agentsettings.models import AgentSettings
+
+            # Resolve model name
+            company = getattr(request.user, "company_profile", None)
+            startup = request.user.startups.first()
+            organization = None
+            if company:
+                from organization.models import Organization
+                organization, _ = Organization.objects.get_or_create(
+                    company=company,
+                    defaults={"name": company.company_name}
+                )
+            settings_obj, _ = AgentSettings.objects.get_or_create(
+                organization=organization,
+                startup=startup,
+                defaults={
+                    "llm_model": "gemini-2.5-flash",
+                    "max_iterations": 30,
+                    "autonomy_level": "full_autonomy"
+                }
+            )
+            model_name = settings_obj.llm_model if settings_obj else "gemini-2.5-flash"
 
             planner = get_planner()
             action = planner.think(
@@ -203,6 +225,7 @@ class LLMThinkView(APIView):
                 iteration=iteration,
                 user_response=user_response,
                 original_goal=original_goal,
+                model_name=model_name,
             )
 
             return Response(action, status=status.HTTP_200_OK)

@@ -19,16 +19,42 @@ class AutonomousAgentService:
     """
 
     @staticmethod
-    def _decompose_goal(user_goal: str) -> List[str]:
-        """Uses Gemini to split a complex goal into discrete sub-goals."""
-        api_key = os.environ.get("GEMINI_API_KEY") or getattr(
-            settings, "GEMINI_API_KEY", ""
-        )
-        if not api_key:
-            return [user_goal]
-
-        try:
+    def _call_llm(model_name: str, prompt: str) -> str:
+        if model_name in ("kimi", "Kimi-K2.6"):
+            from AI.services import AIService
+            return AIService.call_kimi_api(prompt)
+        elif model_name in ("grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning"):
+            from AI.services import AIService
+            return AIService.call_grok_api(prompt)
+        elif model_name in ("grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"):
+            from AI.services import AIService
+            return AIService.call_grok_4_1_api(prompt)
+        else:
+            # Default gemini
+            from django.conf import settings
+            import os
+            from google import genai
+            
+            api_key = os.environ.get("GEMINI_API_KEY") or getattr(
+                settings, "GEMINI_API_KEY", ""
+            )
+            if not api_key:
+                raise ValueError("GEMINI_API_KEY is not set.")
+                
             client = genai.Client(api_key=api_key)
+            gemini_model = model_name if model_name in ("gemini-2.5-flash", "gemini-2.5-flash-lite") else "gemini-2.5-flash-lite"
+            
+            response = client.models.generate_content(
+                model=gemini_model,
+                contents=prompt,
+                config={"response_mime_type": "application/json"},
+            )
+            return response.text
+
+    @staticmethod
+    def _decompose_goal(user_goal: str, model_name: str = "gemini-2.5-flash-lite") -> List[str]:
+        """Uses dynamic LLM model to split a complex goal into discrete sub-goals."""
+        try:
             prompt = f"""
             Analyze the following user goal for a recruitment AI agent: "{user_goal}"
             
@@ -39,23 +65,27 @@ class AutonomousAgentService:
             If it's only one task, return a list with one item.
             """
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt,
-                config={"response_mime_type": "application/json"},
-            )
-            data = json.loads(response.text)
+            resp_text = AutonomousAgentService._call_llm(model_name, prompt).strip()
+            from AI.parsers import strip_markdown_fences
+            resp_text = strip_markdown_fences(resp_text)
+            data = json.loads(resp_text)
             return data.get("tasks", [user_goal])
         except Exception as e:
             logger.error(f"Goal decomposition failed: {e}")
             return [user_goal]
 
     @staticmethod
-    def _parse_continuation_intent(user_goal: str) -> List[Dict]:
-        """Uses Gemini to intelligently parse the user's reconfiguration response."""
-        api_key = os.environ.get("GEMINI_API_KEY") or getattr(
-            settings, "GEMINI_API_KEY", ""
-        )
+    def _parse_continuation_intent(user_goal: str, model_name: str = "gemini-2.5-flash-lite") -> List[Dict]:
+        """Uses LLM to intelligently parse the user's reconfiguration response."""
+        has_provider_credentials = False
+        if model_name in ("kimi", "Kimi-K2.6"):
+            has_provider_credentials = getattr(settings, "KIMI_API_KEY", None) is not None or getattr(settings, "AZURE_KIMI_ENDPOINT", None) is not None or getattr(settings, "AZUREPROJECT_ENDPOINT", None) is not None
+        elif model_name in ("grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning"):
+            has_provider_credentials = getattr(settings, "GROK_API_KEY", None) is not None or getattr(settings, "AZURE_GROK_ENDPOINT", None) is not None
+        elif model_name in ("grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"):
+            has_provider_credentials = getattr(settings, "AZURE_GROK_API_2", None) is not None or getattr(settings, "AZURE_GROK_ENDPOINT_2", None) is not None
+        else:
+            has_provider_credentials = os.environ.get("GEMINI_API_KEY") or getattr(settings, "GEMINI_API_KEY", "")
 
         # Check if this is a confirmation for a multi-task plan
         # We look for the "Plan Summary:" marker we put in the ask_user message
@@ -95,7 +125,7 @@ class AutonomousAgentService:
                 ]
 
                 # Bulk generate all job data in one go to prevent sequential Gemini timeouts
-                all_job_data = AutonomousAgentService._generate_multi_ai_job_data(tasks)
+                all_job_data = AutonomousAgentService._generate_multi_ai_job_data(tasks, model_name=model_name)
 
                 for i, job_data in enumerate(all_job_data):
                     task_name = tasks[i]
@@ -106,7 +136,7 @@ class AutonomousAgentService:
                         }
                     )
 
-                    # Manual construction of plan steps to avoid re-calling Gemini inside the loop
+                    # Manual construction of plan steps to avoid re-calling LLM inside the loop
                     job_plan = [
                         {"type": "wait", "duration": 2000},
                         {"type": "click", "selector": "nav-tab-my-jobs"},
@@ -240,7 +270,7 @@ class AutonomousAgentService:
             {"type": "wait", "duration": 2500},
         ]
 
-        if not api_key:
+        if not has_provider_credentials:
             # Fallback
             if not ("no " in user_goal.lower() or "don't" in user_goal.lower()):
                 plan.extend(
@@ -255,7 +285,6 @@ class AutonomousAgentService:
                 )
         else:
             try:
-                client = genai.Client(api_key=api_key)
                 prompt = f"""
                 The autonomous AI agent paused execution to ask the recruiter: 
                 "Candidate is already configured. Do you want to regenerate the AI questions?" OR "New candidate selected. How many rounds and what difficulty do you need?"
@@ -268,12 +297,10 @@ class AutonomousAgentService:
                 Return a JSON object with exactly one key: "should_generate_questions" with a boolean value (true or false).
                 """
 
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
-                    contents=prompt,
-                    config={"response_mime_type": "application/json"},
-                )
-                data = json.loads(response.text)
+                resp_text = AutonomousAgentService._call_llm(model_name, prompt).strip()
+                from AI.parsers import strip_markdown_fences
+                resp_text = strip_markdown_fences(resp_text)
+                data = json.loads(resp_text)
 
                 if data.get("should_generate_questions", True):
                     plan.extend(
@@ -325,18 +352,24 @@ class AutonomousAgentService:
         return plan
 
     @staticmethod
-    def _generate_ai_job_data(goal_text: str) -> Dict:
+    def _generate_ai_job_data(goal_text: str, model_name: str = "gemini-2.5-flash-lite") -> Dict:
         """
-        Uses Gemini to generate rich job data based on the user's goal.
+        Uses LLM to generate rich job data based on the user's goal.
         """
-        api_key = os.environ.get("GEMINI_API_KEY") or getattr(
-            settings, "GEMINI_API_KEY", ""
-        )
+        has_provider_credentials = False
+        if model_name in ("kimi", "Kimi-K2.6"):
+            has_provider_credentials = getattr(settings, "KIMI_API_KEY", None) is not None or getattr(settings, "AZURE_KIMI_ENDPOINT", None) is not None or getattr(settings, "AZUREPROJECT_ENDPOINT", None) is not None
+        elif model_name in ("grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning"):
+            has_provider_credentials = getattr(settings, "GROK_API_KEY", None) is not None or getattr(settings, "AZURE_GROK_ENDPOINT", None) is not None
+        elif model_name in ("grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"):
+            has_provider_credentials = getattr(settings, "AZURE_GROK_API_2", None) is not None or getattr(settings, "AZURE_GROK_ENDPOINT_2", None) is not None
+        else:
+            has_provider_credentials = os.environ.get("GEMINI_API_KEY") or getattr(settings, "GEMINI_API_KEY", "")
 
         # Calculate default one month deadline
         default_deadline = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
 
-        if not api_key:
+        if not has_provider_credentials:
             return {
                 "title": "Senior Full Stack Developer",
                 "description": "We are looking for a skilled developer to build autonomous AI systems. Experience with React, Node.js, and LLMs is required.",
@@ -357,7 +390,6 @@ class AutonomousAgentService:
             }
 
         try:
-            client = genai.Client(api_key=api_key)
             prompt = f"""
             A recruiter wants to: {goal_text}
             Generate a highly professional and detailed job posting.
@@ -611,12 +643,10 @@ The response must remain structured, deterministic, and ATS-friendly.
             - skills: A comprehensive list of 5 to 10 highly relevant tech skills, libraries, frameworks, and specialized concepts/subtopics tailored dynamically to the requested job title and seniority level. If the title is simply "Developer" or has no explicit seniority keyword, assume a Mid-level role requiring 1+ years of experience and generate professional skills appropriate for that level.
             """
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt,
-                config={"response_mime_type": "application/json"},
-            )
-            data = json.loads(response.text)
+            resp_text = AutonomousAgentService._call_llm(model_name, prompt).strip()
+            from AI.parsers import strip_markdown_fences
+            resp_text = strip_markdown_fences(resp_text)
+            data = json.loads(resp_text)
             # Force deadline to be one month if AI hallucinates
             data["deadline"] = default_deadline
             return data
@@ -640,18 +670,24 @@ The response must remain structured, deterministic, and ATS-friendly.
             }
 
     @staticmethod
-    def _generate_multi_ai_job_data(tasks: List[str]) -> List[Dict]:
-        """Uses a single Gemini call to generate data for multiple jobs at once (prevents timeouts)."""
-        api_key = os.environ.get("GEMINI_API_KEY") or getattr(
-            settings, "GEMINI_API_KEY", ""
-        )
+    def _generate_multi_ai_job_data(tasks: List[str], model_name: str = "gemini-2.5-flash-lite") -> List[Dict]:
+        """Uses a single dynamic LLM call to generate data for multiple jobs at once (prevents timeouts)."""
+        has_provider_credentials = False
+        if model_name in ("kimi", "Kimi-K2.6"):
+            has_provider_credentials = getattr(settings, "KIMI_API_KEY", None) is not None or getattr(settings, "AZURE_KIMI_ENDPOINT", None) is not None or getattr(settings, "AZUREPROJECT_ENDPOINT", None) is not None
+        elif model_name in ("grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning"):
+            has_provider_credentials = getattr(settings, "GROK_API_KEY", None) is not None or getattr(settings, "AZURE_GROK_ENDPOINT", None) is not None
+        elif model_name in ("grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"):
+            has_provider_credentials = getattr(settings, "AZURE_GROK_API_2", None) is not None or getattr(settings, "AZURE_GROK_ENDPOINT_2", None) is not None
+        else:
+            has_provider_credentials = os.environ.get("GEMINI_API_KEY") or getattr(settings, "GEMINI_API_KEY", "")
+
         default_deadline = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
 
-        if not api_key:
-            return [AutonomousAgentService._generate_ai_job_data(t) for t in tasks]
+        if not has_provider_credentials:
+            return [AutonomousAgentService._generate_ai_job_data(t, model_name=model_name) for t in tasks]
 
         try:
-            client = genai.Client(api_key=api_key)
             tasks_str = "\n".join([f"- {t}" for t in tasks])
             prompt = f"""
             Generate professional job postings for the following tasks:
@@ -682,18 +718,16 @@ The response must remain structured, deterministic, and ATS-friendly.
             - skills: A comprehensive list of 5 to 10 highly relevant tech skills, frameworks, libraries, and specialized subtopics matching the job's seniority level. If the seniority is unspecified or just "Developer", assume a Mid-level role requiring 1+ years of experience and generate skills appropriate for that level.
             """
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
-                contents=prompt,
-                config={"response_mime_type": "application/json"},
-            )
-            data = json.loads(response.text)
+            resp_text = AutonomousAgentService._call_llm(model_name, prompt).strip()
+            from AI.parsers import strip_markdown_fences
+            resp_text = strip_markdown_fences(resp_text)
+            data = json.loads(resp_text)
             jobs = data.get("jobs", [])
 
             # Ensure every task has a job entry, even if AI skipped some
             if len(jobs) < len(tasks):
                 for i in range(len(jobs), len(tasks)):
-                    jobs.append(AutonomousAgentService._generate_ai_job_data(tasks[i]))
+                    jobs.append(AutonomousAgentService._generate_ai_job_data(tasks[i], model_name=model_name))
 
             # Force deadline
             for job in jobs:
@@ -701,23 +735,45 @@ The response must remain structured, deterministic, and ATS-friendly.
             return jobs
         except Exception as e:
             logger.error(f"Multi-job generation failed: {e}")
-            return [AutonomousAgentService._generate_ai_job_data(t) for t in tasks]
+            return [AutonomousAgentService._generate_ai_job_data(t, model_name=model_name) for t in tasks]
 
     @staticmethod
-    def generate_plan(goal: Dict, skip_decompose: bool = False) -> List[Dict]:
+    def generate_plan(goal: Dict, skip_decompose: bool = False, user=None) -> List[Dict]:
         """
         Translates a natural language goal into a sequence of frontend actions.
         Uses tab switching (click) instead of URL navigation.
         """
+        model_name = "gemini-2.5-flash-lite"
+        if user and user.is_authenticated:
+            try:
+                from agentsettings.models import AgentSettings
+                company = getattr(user, "company_profile", None)
+                startup = user.startups.first()
+                organization = None
+                if company:
+                    from organization.models import Organization
+                    organization, _ = Organization.objects.get_or_create(
+                        company=company,
+                        defaults={"name": company.company_name}
+                    )
+                settings_obj = AgentSettings.objects.filter(
+                    organization=organization,
+                    startup=startup
+                ).first()
+                if settings_obj and settings_obj.llm_model:
+                    model_name = settings_obj.llm_model
+            except Exception:
+                pass
+
         user_goal = goal.get("goal", "").lower()
 
         # Highest priority: Continuing a paused workflow (e.g., after ask_user)
         if "regarding my previous request" in user_goal:
-            return AutonomousAgentService._parse_continuation_intent(user_goal)
+            return AutonomousAgentService._parse_continuation_intent(user_goal, model_name=model_name)
 
         # Decompose goal if multi-tasking is detected
         if not skip_decompose:
-            tasks = AutonomousAgentService._decompose_goal(user_goal)
+            tasks = AutonomousAgentService._decompose_goal(user_goal, model_name=model_name)
             if len(tasks) > 1:
                 summary = "\n".join([f"{i + 1}. {t}" for i, t in enumerate(tasks)])
                 return [

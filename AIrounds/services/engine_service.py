@@ -112,13 +112,73 @@ class InterviewEngineService:
         round_obj = InterviewRound.objects.get(id=round_id)
         previous_questions = InterviewQuestion.objects.filter(round=round_obj).order_by('asked_at')
         
-        context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
+        GENERAL_ROUNDS = {
+            "APTITUDE_ROUND",
+            "LOGICAL_REASONING",
+            "COMMUNICATION_ROUND",
+            "HR_SCREENING",
+            "BEHAVIORAL_ROUND",
+            "SITUATIONAL_ROUND",
+            "CULTURAL_FIT",
+            "LEADERSHIP_ROUND",
+            "MANAGERIAL_ROUND",
+            "FINAL_HR_ROUND",
+        }
+        
+        if round_obj.designation in GENERAL_ROUNDS:
+            context_data = {
+                "round_info": {
+                    "designation": round_obj.designation,
+                    "designation_display": round_obj.get_designation_display(),
+                    "difficulty": round_obj.difficulty
+                },
+                "previous_data": [
+                    {
+                        "question": q.question_text,
+                        "answer": q.candidate_answer,
+                        "evaluation": q.evaluation
+                    } for q in previous_questions if q.candidate_answer
+                ]
+            }
+            context = json.dumps(context_data)
+        else:
+            context = InterviewPromptService.build_interview_context(session, round_obj, previous_questions)
+            
         prompt = f"Based on the following context, generate the next interview question.\n\nCONTEXT:\n{context}"
+        
+        company = session.application.job.company if (session.application and session.application.job) else None
+        model_name = AIBaseService.get_model_for_company(company)
+        
+        is_gemini = model_name not in ("kimi", "Kimi-K2.6", "grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning", "grok-4-1-fast-non-reasoning", "grok-4.1-non-reasoning")
+        
+        system_instruction = InterviewPromptService.get_system_prompt()
+        if round_obj.designation in GENERAL_ROUNDS:
+            system_instruction += (
+                "\n\nCRITICAL: This is a GENERAL/COMMON round. Do NOT relate questions to any specific job description, "
+                "technical domain, AI/ML, programming languages, software engineering, or candidate details. "
+                "Generate standard, universally applicable professional and cognitive assessment questions."
+            )
+            
+        if not is_gemini:
+            prompt += (
+                "\n\nYou must return a JSON object exactly matching this structure:\n"
+                "{\n"
+                '  "type": "QUESTION",\n'
+                '  "round_type": "...",\n'
+                '  "difficulty": "...",\n'
+                '  "question": "The next question...",\n'
+                '  "ideal_answer": "Detailed criteria or correct response...",\n'
+                '  "expected_topics": [],\n'
+                '  "skills_evaluated": [],\n'
+                '  "time_limit_seconds": 120\n'
+                "}\n"
+            )
         
         response_text = AIBaseService.generate_content(
             prompt=prompt,
-            system_instruction=InterviewPromptService.get_system_prompt(),
-            temperature=0.7
+            system_instruction=system_instruction,
+            temperature=0.7,
+            model_name=model_name
         )
         
         try:
@@ -177,29 +237,74 @@ class InterviewEngineService:
     }
 
     @staticmethod
-    def generate_question_pool(application_id, round_type, designation, difficulty, round_category='NON_CODING', question_format='TEXT', programming_language='', count=5, coding_topics=None, coding_frameworks=None):
+    def generate_question_pool(application_id, round_type, designation, difficulty, round_category='NON_CODING', question_format='TEXT', programming_language='', count=5, coding_topics=None, coding_frameworks=None, model_name=None):
         from jobs.models import JobApplication
         application = JobApplication.objects.get(id=application_id)
         
-        context = InterviewPromptService.build_config_context(
-            application, round_type, designation, difficulty, round_category, question_format, programming_language
-        )
+        company = application.job.company if (application and application.job) else None
+        if not model_name:
+            model_name = AIBaseService.get_model_for_company(company)
+            
+        is_gemini = model_name not in ("kimi", "Kimi-K2.6", "grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning", "grok-4-1-fast-non-reasoning", "grok-4.1-non-reasoning")
+        
+        GENERAL_ROUNDS = {
+            "APTITUDE_ROUND",
+            "LOGICAL_REASONING",
+            "COMMUNICATION_ROUND",
+            "HR_SCREENING",
+            "BEHAVIORAL_ROUND",
+            "SITUATIONAL_ROUND",
+            "CULTURAL_FIT",
+            "LEADERSHIP_ROUND",
+            "MANAGERIAL_ROUND",
+            "FINAL_HR_ROUND",
+        }
+        
+        if designation in GENERAL_ROUNDS:
+            context = json.dumps({
+                "round_info": {
+                    "designation": designation,
+                    "difficulty": difficulty,
+                    "round_category": round_category,
+                    "question_format": question_format,
+                }
+            })
+        else:
+            context = InterviewPromptService.build_config_context(
+                application, round_type, designation, difficulty, round_category, question_format, programming_language
+            )
         
         # Get designation-specific focus (the #1 priority for question content)
         designation_focus = InterviewEngineService.DESIGNATION_FOCUS.get(designation, "")
         designation_instruction = ""
         if designation_focus:
-            designation_instruction = (
-                f"ROUND DESIGNATION FOCUS (HIGHEST PRIORITY):\n"
-                f"This is a '{designation}' round. Questions MUST be about: {designation_focus}\n"
-                f"The ROUND DESIGNATION is the #1 priority — it defines the topic area.\n"
-                f"Do NOT let the job description's tech stack override the round designation.\n"
-                f"For example: If designation is APTITUDE_ROUND, generate aptitude questions even if the job is for a Python Developer.\n\n"
-            )
+            if designation in GENERAL_ROUNDS:
+                designation_instruction = (
+                    f"ROUND DESIGNATION FOCUS (HIGHEST PRIORITY):\n"
+                    f"This is a general, role-agnostic '{designation}' round. Questions MUST be about: {designation_focus}\n"
+                    f"CRITICAL: The questions generated MUST be completely role-agnostic. "
+                    "Do NOT include or relate the questions to any specific technical role, AI/ML, programming languages, software engineering, or candidate details. "
+                    "Keep questions standard and universally applicable to general professional and cognitive assessment.\n\n"
+                )
+            else:
+                designation_instruction = (
+                    f"ROUND DESIGNATION FOCUS (HIGHEST PRIORITY):\n"
+                    f"This is a '{designation}' round. Questions MUST be about: {designation_focus}\n"
+                    f"The ROUND DESIGNATION is the #1 priority — it defines the topic area.\n"
+                    f"Do NOT let the job description's tech stack override the round designation.\n"
+                    f"For example: If designation is APTITUDE_ROUND, generate aptitude questions even if the job is for a Python Developer.\n\n"
+                )
 
         # Build category-specific instructions (Coding vs Non-Coding)
         category_instruction = ""
-        if round_category == 'CODING':
+        if designation in GENERAL_ROUNDS:
+            category_instruction = (
+                f"ROUND TYPE: NON-CODING — Generate general professional assessment questions.\n"
+                "CRITICAL RULES:\n"
+                "- Questions should test general understanding, communication, reasoning, or behavior.\n"
+                "- Do NOT generate questions that require writing code, technical software concepts, or programming."
+            )
+        elif round_category == 'CODING':
             lang_note = f" in {programming_language}" if programming_language else ""
             category_instruction = (
                 f"ROUND TYPE: CODING — Generate hands-on coding/programming problems{lang_note}.\n"
@@ -245,7 +350,17 @@ class InterviewEngineService:
             format_instruction = "Each question should be an open-ended text question requiring a written answer."
 
         # Category-specific system prompts
-        if round_category == 'CODING':
+        if designation in GENERAL_ROUNDS:
+            system_prompt = (
+                "You are an expert interview question generator. "
+                "The MOST IMPORTANT rule: questions must STRICTLY match the round designation. "
+                "This is a general, role-agnostic round. "
+                "Do NOT relate questions to any specific job description, technical domain, AI/ML, programming languages, software engineering, or candidate details. "
+                "Generate standard, universally applicable professional and cognitive assessment questions. "
+                "For each question, also generate a detailed 'ideal_answer' for evaluation. "
+                "Return ONLY valid JSON. Do not include unescaped newlines or tabs inside the JSON strings; use \\n and \\t instead."
+            )
+        elif round_category == 'CODING':
             system_prompt = (
                 "You are an expert coding interview question generator. "
                 "Generate programming problems and coding challenges based on the job title and required skills. "
@@ -281,27 +396,44 @@ class InterviewEngineService:
 
         # Step 1: Generate remaining distinct subtopics to ensure diversity and parallelize question generation
         if remaining_count > 0:
-            system_prompt_topics = (
-                "You are an expert interview designer. "
-                f"Given the job requirements and round designation ({designation_focus or designation}), "
-                f"generate a list of exactly {remaining_count} additional distinct focus subtopics/concepts that should be tested. "
-                "Each subtopic should be specific and unique to ensure a well-rounded assessment of the candidate."
-            )
-
             existing_topics_str = f" Ensure they are different from these already selected topics: {', '.join(topics)}." if topics else ""
-            prompt_topics = (
-                f"Generate a list of exactly {remaining_count} additional distinct focus subtopics for a '{designation}' round. "
-                f"{existing_topics_str} "
-                f"Difficulty level: {difficulty}.\n\n"
-                f"Context:\n{context}"
-            )
+            if designation in GENERAL_ROUNDS:
+                system_prompt_topics = (
+                    "You are an expert interview designer. "
+                    f"Given the round designation ({designation_focus or designation}), "
+                    f"generate a list of exactly {remaining_count} distinct focus subtopics/concepts that should be tested. "
+                    "Each subtopic should be specific, generic, and unique to ensure a well-rounded assessment of the candidate's general professional and cognitive abilities."
+                )
+                prompt_topics = (
+                    f"Generate a list of exactly {remaining_count} distinct focus subtopics for a general '{designation}' round. "
+                    f"{existing_topics_str} "
+                    f"Difficulty level: {difficulty}.\n\n"
+                    f"Context:\n{context}"
+                )
+            else:
+                system_prompt_topics = (
+                    "You are an expert interview designer. "
+                    f"Given the job requirements and round designation ({designation_focus or designation}), "
+                    f"generate a list of exactly {remaining_count} additional distinct focus subtopics/concepts that should be tested. "
+                    "Each subtopic should be specific and unique to ensure a well-rounded assessment of the candidate."
+                )
+                prompt_topics = (
+                    f"Generate a list of exactly {remaining_count} additional distinct focus subtopics for a '{designation}' round. "
+                    f"{existing_topics_str} "
+                    f"Difficulty level: {difficulty}.\n\n"
+                    f"Context:\n{context}"
+                )
+            
+            if not is_gemini:
+                prompt_topics += "\n\nYou must return a JSON object with a single key 'topics' containing a list of strings. Example: {\"topics\": [\"topic1\", \"topic2\"]}"
 
             try:
                 topics_response = AIBaseService.generate_content(
                     prompt=prompt_topics,
                     system_instruction=system_prompt_topics,
                     temperature=0.5,
-                    response_schema=TopicList
+                    response_schema=TopicList,
+                    model_name=model_name
                 )
                 topics_data = json.loads(topics_response)
                 generated_topics = topics_data.get("topics", [])
@@ -337,6 +469,21 @@ class InterviewEngineService:
                 f"CONTEXT:\n{context}"
             )
             
+            if not is_gemini:
+                single_prompt += (
+                    "\n\nYou must return a JSON object exactly matching this structure:\n"
+                    "{\n"
+                    '  "question": "The main question text...",\n'
+                    '  "ideal_answer": "Detailed ideal answer...",\n'
+                    '  "mcq_options": [\n'
+                    '    {"label": "A", "text": "Option A text...", "is_correct": false},\n'
+                    '    {"label": "B", "text": "Option B text...", "is_correct": true},\n'
+                    '    ...\n'
+                    '  ]\n'
+                    "}\n"
+                    "Ensure 'mcq_options' is empty if not an MCQ or MULTI_SELECT question."
+                )
+            
             lang_focus = f" using '{programming_language}'" if programming_language else ""
             framework_focus_text = f" and framework '{', '.join(coding_frameworks) if isinstance(coding_frameworks, list) else coding_frameworks}'" if coding_frameworks else ""
             single_system_prompt = system_prompt + f"\nFocus strictly on generating a question about the subtopic: '{topic}'{lang_focus}{framework_focus_text}."
@@ -352,7 +499,8 @@ class InterviewEngineService:
                         prompt=single_prompt,
                         system_instruction=single_system_prompt,
                         temperature=0.7 + (attempt * 0.1),
-                        response_schema=GeneratedQuestion
+                        response_schema=GeneratedQuestion,
+                        model_name=model_name
                     )
                     
                     data = json.loads(res_text)
