@@ -76,8 +76,8 @@ class AnalyzeResumesView(APIView, ResponseMixin):
             )
 
         # 1. Get Applications
-        applications = list(job.applications.filter(status="PENDING", is_deleted=False))
-        app_ids = [app.id for app in applications]
+        applications = list(job.applications.filter(status__in=["PENDING", "REVIEWED"], is_deleted=False))
+        app_ids = [str(app.id) for app in applications]
         if not applications:
             all_scored_qs = job.applications.filter(
                 ai_score__isnull=False, is_deleted=False
@@ -100,8 +100,8 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                             except:
                                 pass
 
-                # Sort by corrected score descending to update priorities/rankings
-                all_scored_list.sort(key=lambda c: c.ai_score or 0, reverse=True)
+                # Sort by corrected score descending (primary) and skills match percentage (secondary) to update priorities/rankings
+                all_scored_list.sort(key=lambda c: (c.ai_score or 0, AIService.get_skills_match_pct(c.ai_analysis)), reverse=True)
 
                 results_data = []
                 for rank, cand in enumerate(all_scored_list, 1):
@@ -158,7 +158,7 @@ class AnalyzeResumesView(APIView, ResponseMixin):
                 )
             return self.build_response(
                 "error",
-                "No pending applications found.",
+                "No applications found to screen.",
                 {},
                 status.HTTP_400_BAD_REQUEST,
             )
@@ -167,13 +167,13 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         from django.utils import timezone
         from datetime import timedelta
 
-        two_minutes_ago = timezone.now() - timedelta(minutes=2)
+        ten_minutes_ago = timezone.now() - timedelta(minutes=10)
         existing_report = AIScreeningReport.objects.filter(
             job_id=job.id, results__status="processing"
         ).first()
 
-        # If a report is processing but older than 2 min, it's likely stuck — allow restart
-        is_stale = existing_report and existing_report.created_at < two_minutes_ago
+        # If a report is processing but older than 10 min, it's likely stuck — allow restart
+        is_stale = existing_report and existing_report.created_at < ten_minutes_ago
 
         if existing_report and not is_stale:
             return self.build_response(
@@ -196,6 +196,8 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         # 3. Extract & Validate Model
         model = request.data.get("model", "gemini-2.5-flash-lite").strip()
         allowed_models = [
+            "kimi",
+            "Kimi-K2.6",
             "gemini-3.5-flash",
             "gemini-3.5-flash-live",
             "gemini-3.0-flash-live",
@@ -260,9 +262,12 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         # 5. Trigger Celery Task
         from AI.tasks import process_ai_screening
 
-        process_ai_screening.delay(
+        task = process_ai_screening.delay(
             str(job.id), request.user.id, app_ids, str(report.id), model=model
         )
+        report.results["task_id"] = task.id
+        report.results["app_ids"] = app_ids
+        report.save(update_fields=["results"])
 
         return self.build_response(
             "success",
@@ -280,6 +285,27 @@ class DeleteScreeningReportView(APIView, ResponseMixin):
             report = AIScreeningReport.objects.get(
                 id=report_id, recruiter=request.user, is_deleted=False
             )
+            
+            # Revoke the Celery task if it is still processing
+            if report.results and report.results.get("status") == "processing":
+                task_id = report.results.get("task_id")
+                if task_id:
+                    try:
+                        from maincore.celery import app as celery_app
+                        celery_app.control.revoke(task_id, terminate=True)
+                        print(f"[AI] Revoked Celery task: {task_id}")
+                    except Exception as e:
+                        print(f"[AI] Failed to revoke Celery task: {e}")
+
+                # Restore applications that haven't been scored yet back to PENDING status
+                app_ids = report.results.get("app_ids")
+                if app_ids:
+                    JobApplication.objects.filter(
+                        id__in=app_ids,
+                        ai_score__isnull=True,
+                        status="REVIEWED"
+                    ).update(status="PENDING")
+
             report.is_deleted = True
             report.save(update_fields=["is_deleted"])
             return self.build_response("success", "Report deleted.")

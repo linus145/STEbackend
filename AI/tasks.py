@@ -39,6 +39,12 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
         job = JobPost.objects.get(id=job_id)
         user = User.objects.get(id=user_id)
         report = AIScreeningReport.objects.get(id=report_id)
+
+        # Safeguard: if report is already completed, do not execute duplicate screening
+        if report.results and report.results.get("status") == "completed":
+            logger.info(f"[AI Task] Report {report_id} is already completed. Skipping screening task.")
+            return report.results
+
         
         apps_to_screen = list(
             JobApplication.objects.filter(id__in=app_ids).select_related("applicant")
@@ -72,7 +78,7 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
 
         # 1. Parallel execution of AI analysis (The heavy I/O part)
         results_map = {}
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=30) as executor:
             future_to_app = {
                 executor.submit(
                     screen_single_candidate,
@@ -111,6 +117,8 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
                     else:
                         errors.append(f"{app_db.applicant.email}: {analysis_json}")
                         logger.error(f"[AI Task] Result failed for: {app_db.applicant.email}")
+                        app_db.status = "PENDING"
+                        app_db.save()
 
                 # Update progress in the report for frontend visibility
                 report.results["processed_count"] = processed_count
@@ -144,8 +152,8 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
                     except:
                         pass
 
-        # Sort by corrected score descending to update priorities/rankings
-        all_scored_list.sort(key=lambda c: c.ai_score or 0, reverse=True)
+        # Sort by corrected score descending (primary) and skills match percentage (secondary) to update priorities/rankings
+        all_scored_list.sort(key=lambda c: (c.ai_score or 0, AIService.get_skills_match_pct(c.ai_analysis)), reverse=True)
 
         results_data = []
         for rank, cand in enumerate(all_scored_list, 1):
@@ -204,31 +212,34 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
         }
         report.save()
 
-        # ── AUTO-PROMOTION: Use AI's own pipeline_disposition, not raw score ──
-        # Only SHORTLIST disposition (score typically ≥ 90) triggers immediate
-        # promotion to INTERVIEW + orchestration. This keeps the AI's reasoning
-        # gate in control rather than a hard numeric threshold.
+        # ── AUTO-PROMOTION: Use AI's recommendation or programmatic fallback ──
+        # Only SHORTLIST, STRONG_HIRE or score >= 90 triggers immediate promotion
+        # to INTERVIEW + orchestration.
         if all_scored.exists():
             top_candidate = all_scored.first()
             if top_candidate.ai_score is not None:
                 disposition = ""
+                recommendation = ""
                 try:
                     if top_candidate.ai_analysis and top_candidate.ai_analysis.strip().startswith("{"):
                         a_obj = json.loads(top_candidate.ai_analysis)
-                        disposition = a_obj.get("recruiter_view", {}).get("pipeline_disposition", "")
+                        rv = a_obj.get("recruiter_view", {})
+                        disposition = rv.get("pipeline_disposition", "")
+                        recommendation = rv.get("recommendation", "")
                 except Exception:
                     pass
 
-                # Promote if AI says SHORTLIST OR score is exceptionally high
+                # Promote if AI says SHORTLIST, recommendation is STRONG_HIRE, or score >= 90
                 should_promote = (
                     disposition == "SHORTLIST"
-                    or (not disposition and top_candidate.ai_score >= 80)
+                    or recommendation == "STRONG_HIRE"
+                    or top_candidate.ai_score >= 90
                 )
 
                 if should_promote:
                     logger.info(
                         f"[AI Task] Auto-promoting top candidate {top_candidate.applicant.email} "
-                        f"to INTERVIEW — disposition={disposition or 'N/A'}, score={top_candidate.ai_score}"
+                        f"to INTERVIEW — disposition={disposition or 'N/A'}, recommendation={recommendation or 'N/A'}, score={top_candidate.ai_score}"
                     )
                     top_candidate.status = "INTERVIEW"
                     top_candidate.save()
@@ -241,7 +252,7 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
                 else:
                     logger.info(
                         f"[AI Task] Top candidate NOT promoted — "
-                        f"disposition={disposition or 'N/A'}, score={top_candidate.ai_score}"
+                        f"disposition={disposition or 'N/A'}, recommendation={recommendation or 'N/A'}, score={top_candidate.ai_score}"
                     )
 
         return report.results
@@ -254,6 +265,14 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
             report.results["error"] = str(e)
             report.results["model_used"] = model
             report.save()
-        except:
-            pass
+
+            # Restore applications that haven't been scored yet back to PENDING status
+            if app_ids:
+                JobApplication.objects.filter(
+                    id__in=app_ids,
+                    ai_score__isnull=True,
+                    status="REVIEWED"
+                ).update(status="PENDING")
+        except Exception as db_err:
+            logger.error(f"Failed to restore application statuses on task failure: {db_err}")
         raise e

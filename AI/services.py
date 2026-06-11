@@ -175,6 +175,62 @@ class AIService:
             logger.error(f"[AI] Text extraction failed: {e}")
             return ""
 
+    @staticmethod
+    def call_kimi_api(prompt):
+        """Calls Kimi API using the official OpenAI client SDK with Azure AD or Moonshot key."""
+        from openai import OpenAI
+        from django.conf import settings
+
+        api_key = getattr(settings, "KIMI_API_KEY", None)
+        azure_endpoint = getattr(settings, "AZUREPROJECT_ENDPOINT", "")
+
+        if azure_endpoint:
+            from urllib.parse import urlparse
+            parsed = urlparse(azure_endpoint)
+            base_url = f"{parsed.scheme}://{parsed.netloc}/openai/v1"
+
+            if not api_key:
+                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                token_provider = get_bearer_token_provider(
+                    DefaultAzureCredential(), "https://ai.azure.com/.default"
+                )
+                client = OpenAI(
+                    base_url=base_url,
+                    api_key=token_provider
+                )
+                print("[AI] Initialized Kimi client using Azure Entra ID bearer token provider.")
+            else:
+                client = OpenAI(
+                    base_url=base_url,
+                    api_key=api_key
+                )
+                print("[AI] Initialized Kimi client using Azure static API key.")
+        else:
+            if not api_key:
+                raise ValueError("Kimi API key is not configured.")
+            client = OpenAI(
+                base_url="https://api.moonshot.cn/v1",
+                api_key=api_key
+            )
+            print("[AI] Initialized Kimi client using Moonshot direct URL.")
+
+        completion = client.chat.completions.create(
+            model="Kimi-K2.6",
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.0,
+            timeout=180.0
+        )
+
+        if completion.choices and len(completion.choices) > 0:
+            return completion.choices[0].message.content
+        else:
+            raise ValueError(f"Unexpected empty completion choices: {completion}")
+
     # ─── World-Class ATS Resume Analysis ──────────────────────────────────
 
     @staticmethod
@@ -189,9 +245,16 @@ class AIService:
           description, required_skills, experience_level, job_type,
           work_mode, department, salary_min, salary_max, currency
         """
-        api_key = getattr(settings, "GEMINI_API_KEY", None)
-        if not api_key:
-            return None, "AI service not configured"
+        # Determine key to validate based on selected model
+        if selected_model in ("kimi", "Kimi-K2.6"):
+            api_key = getattr(settings, "KIMI_API_KEY", None)
+            azure_endpoint = getattr(settings, "AZUREPROJECT_ENDPOINT", "")
+            if not api_key and not azure_endpoint:
+                return None, "Kimi API key or Azure project endpoint must be configured."
+        else:
+            api_key = getattr(settings, "GEMINI_API_KEY", None)
+            if not api_key:
+                return None, "Gemini API key is not configured."
 
         # ── Step 1: Download Resume PDF ────────────────────────────────────
         pdf_bytes, download_error = AIService.download_pdf(resume_url)
@@ -226,10 +289,13 @@ class AIService:
             salary_range = f"From {currency} {salary_min} per annum"
 
         try:
-            # ── Step 3: Initialize Gemini Client ───────────────────────────
-            client = _get_client(api_key)
-
-            pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+            # ── Step 3: Initialize Client / Route Kimi ─────────────────────
+            if selected_model in ("kimi", "Kimi-K2.6"):
+                client = None
+                pdf_part = None
+            else:
+                client = _get_client(api_key)
+                pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
 
             # ── Step 4: World-Class 20-Dimension ATS Prompt ──────────────
             prompt = f"""You are an enterprise-grade AI ATS engine operating at the standard of
@@ -660,15 +726,12 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
     "knockout_reason": "",
     "recommendation": "STRONG_HIRE|HIRE|CONSIDER|WEAK_CONSIDER|REJECT",
     "recommendation_reason": "",
-    "pipeline_disposition": "SHORTLIST|INTERVIEW|HOLD|REJECT",
-    "disposition_rationale": "",
     "strengths": [],
     "concerns": [],
     "red_flags": [],
     "skills_verdict": "",
     "experience_verdict": "",
     "career_progression_verdict": "",
-    "hiring_confidence": "HIGH|MEDIUM|LOW",
     "bias_flags": [],
     "trust_score": 0,
     "recruiter_action_memo": "",
@@ -685,7 +748,49 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
   }}
 }}"""
 
-            # ── Step 5: Invoke Gemini with Model Pipeline ───────────────────
+            # Global Enterprise Speed Instruction (applied to all models)
+            speed_instruction = (
+                "\n\nENTERPRISE SPEED INSTRUCTION (CRITICAL - MUST FOLLOW TO PREVENT TIMEOUTS):\n"
+                "To achieve under 2 minutes for processing 100+ resumes, follow these constraints strictly:\n"
+                "1. For all general description, explanation, reasoning, rationale, action_memo, and summary_text fields: write at least 2 descriptive sentences (minimum 2 lines of details, around 20-30 words).\n"
+                "2. For skills_assessment (matched_required and missing_required arrays): you MUST list ALL matching and non-matching skills. Do NOT cap these arrays. List every single skill precisely with full details and exact evidence from the resume.\n"
+                "3. For other arrays (projects, education, certifications, achievements, tailored_interview_questions): include a maximum of 1 item to optimize speed.\n"
+                "4. For experience_timeline: include a maximum of 1-2 items (the most recent or relevant roles).\n"
+                "5. Absolutely do NOT generate 'pipeline_disposition' or 'hiring_confidence'. Remove them from the output structure.\n"
+                "6. Return only valid JSON. Do not output any markdown blocks (like ```json), introduction, or conclusion."
+            )
+            prompt += speed_instruction
+
+            # ── Step 5: Invoke AI Model / Pipeline ───────────────────
+            if selected_model in ("kimi", "Kimi-K2.6"):
+                print(f"[AI] Calling Kimi API (model: {selected_model})...")
+                last_error = None
+                for attempt in range(1, 4):
+                    try:
+                        t0 = time.time()
+                        kimi_response = AIService.call_kimi_api(prompt)
+                        elapsed = time.time() - t0
+                        print(f"[AI] Kimi responded in {elapsed:.1f}s")
+                        
+                        if kimi_response:
+                            score, analysis = AIService._parse_response(kimi_response)
+                            if score is not None:
+                                return score, analysis
+                            else:
+                                last_error = "Kimi response parser returned None score"
+                        else:
+                            last_error = "Empty response from Kimi"
+                    except Exception as e:
+                        last_error = str(e)
+                        print(f"[AI] Kimi attempt {attempt} failed: {last_error}")
+                        if "429" in last_error or "rate" in last_error.lower() or "limit" in last_error.lower():
+                            sleep_time = attempt * 3
+                            print(f"[AI] Kimi rate limit hit, sleeping {sleep_time}s")
+                            time.sleep(sleep_time)
+                        else:
+                            time.sleep(1)
+                return 0, f"Kimi analysis failed: {last_error}"
+
             # Whitelisted Gemini 2+ and 3+ models
             ALLOWED_GEMINI_2_MODELS = [
                 "gemini-3.5-flash",
@@ -779,3 +884,18 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
     def extract_summary_and_analysis(ai_analysis_str):
         """Extract summary + analysis. Delegates to AI.parsers.extract_summary_and_analysis."""
         return _extract_summary_and_analysis(ai_analysis_str)
+
+    @staticmethod
+    def get_skills_match_pct(ai_analysis_str):
+        """Extract skills match percentage from raw analysis JSON string."""
+        if not ai_analysis_str:
+            return 0
+        try:
+            import json
+            analysis_str = ai_analysis_str.strip()
+            if analysis_str.startswith('{'):
+                analysis_obj = json.loads(analysis_str)
+                return analysis_obj.get("intelligence", {}).get("skills_assessment", {}).get("skills_match_percentage", 0)
+        except:
+            pass
+        return 0

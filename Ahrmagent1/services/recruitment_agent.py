@@ -200,8 +200,8 @@ class RecruitmentAgentService(BrowserAgentService):
                             db_conn.close()
 
                     results = []
-                    # Up to 10 parallel Gemini API calls
-                    with ThreadPoolExecutor(max_workers=10) as executor:
+                    # Up to 30 parallel API calls
+                    with ThreadPoolExecutor(max_workers=30) as executor:
                         futures = {
                             executor.submit(screen_one, a.id, a.applicant.email, a.resume_url): a
                             for a in apps if a.resume_url
@@ -334,8 +334,8 @@ class RecruitmentAgentService(BrowserAgentService):
                             except:
                                 pass
 
-                # Sort by corrected score descending to update priorities/rankings
-                all_scored_list.sort(key=lambda c: c.ai_score or 0, reverse=True)
+                # Sort by corrected score descending (primary) and skills match percentage (secondary) to update priorities/rankings
+                all_scored_list.sort(key=lambda c: (c.ai_score or 0, AIService.get_skills_match_pct(c.ai_analysis)), reverse=True)
 
                 results_data = []
                 for rank, cand in enumerate(all_scored_list, 1):

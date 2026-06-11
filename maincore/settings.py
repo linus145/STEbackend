@@ -406,6 +406,8 @@ NOTIFICATION_DEFAULT_FROM_EMAIL = os.environ.get("NOTIFICATION_DEFAULT_FROM_EMAI
 # AI & External APIs
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
+KIMI_API_KEY = os.environ.get("KIMI_API_KEY", "")
+AZUREPROJECT_ENDPOINT = os.environ.get("azureproject_endpiunt", "")
 
 # Caching Configuration
 if DEBUG:
