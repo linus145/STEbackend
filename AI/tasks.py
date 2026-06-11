@@ -6,26 +6,78 @@ from django.contrib.auth import get_user_model
 from jobs.models import JobApplication, JobPost
 from AI.models import AIScreeningReport
 from AI.services import AIService
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
+
+import threading
+import ctypes
 
 logger = logging.getLogger("ai.tasks")
 User = get_user_model()
 
-def screen_single_candidate(app_id, email, job_title, job_brief, resume_url, model=None):
+# Global registry of active threads per report_id
+_active_threads_by_report = {}
+_threads_lock = threading.Lock()
+
+def register_thread(report_id, thread_id):
+    if not report_id:
+        return
+    with _threads_lock:
+        if report_id not in _active_threads_by_report:
+            _active_threads_by_report[report_id] = set()
+        _active_threads_by_report[report_id].add(thread_id)
+
+def unregister_thread(report_id, thread_id):
+    if not report_id:
+        return
+    with _threads_lock:
+        if report_id in _active_threads_by_report:
+            _active_threads_by_report[report_id].discard(thread_id)
+            if not _active_threads_by_report[report_id]:
+                del _active_threads_by_report[report_id]
+
+def kill_threads_for_report(report_id):
+    if not report_id:
+        return
+    with _threads_lock:
+        threads = list(_active_threads_by_report.pop(report_id, []))
+    for tid in threads:
+        try:
+            # Raise SystemExit exception in the target thread
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(tid), ctypes.py_object(SystemExit))
+            logger.info(f"[AI] Sent SystemExit exception to thread {tid} for report {report_id}")
+        except Exception as e:
+            logger.error(f"[AI] Error killing thread {tid}: {e}")
+
+def screen_single_candidate(app_id, email, job_title, job_brief, resume_url, model=None, report_id=None):
     """
     Helper function to screen a single candidate in a thread.
     job_brief is a structured dict with all ATS criteria.
     """
+    tid = threading.get_ident()
+    register_thread(report_id, tid)
     try:
+        if report_id:
+            from AI.models import AIScreeningReport
+            try:
+                if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                    logger.info(f"[AI Thread] Report {report_id} has been cancelled/deleted. Aborting Gemini call for {email}.")
+                    return app_id, None, "Cancelled"
+            except Exception as db_err:
+                logger.warning(f"[AI Thread] Could not check report status in thread: {db_err}")
+
         logger.info(f"[AI Thread] Starting strict ATS screening for: {email} using model: {model}")
         score, analysis_json = AIService.analyze_resume(
-            job_title, job_brief, resume_url, selected_model=model
+            job_title, job_brief, resume_url, selected_model=model, report_id=report_id
         )
         return app_id, score, analysis_json
+    except SystemExit:
+        logger.info(f"[AI Thread] Thread for {email} was aborted due to cancellation.")
+        return app_id, None, "Cancelled"
     except Exception as e:
         logger.error(f"[AI Thread] Error screening {email}: {e}")
         return app_id, None, str(e)
     finally:
+        unregister_thread(report_id, tid)
         # Each thread must close its connection to avoid leaks
         connection.close()
 
@@ -78,25 +130,52 @@ def process_ai_screening(self, job_id, user_id, app_ids, report_id, model=None):
 
         # 1. Parallel execution of AI analysis (The heavy I/O part)
         results_map = {}
-        with ThreadPoolExecutor(max_workers=30) as executor:
+        cancelled = False
+        executor = ThreadPoolExecutor(max_workers=30)
+        try:
             future_to_app = {
                 executor.submit(
                     screen_single_candidate,
-                    app.id, app.applicant.email, job.title, job_brief, app.resume_url, model
+                    app.id, app.applicant.email, job.title, job_brief, app.resume_url, model, report.id
                 ): app for app in apps_to_screen if app.resume_url
             }
 
-            for future in as_completed(future_to_app):
-                app = future_to_app[future]
-                try:
-                    app_id, score, analysis_json = future.result()
-                    results_map[app_id] = (score, analysis_json)
-                except Exception as exc:
-                    logger.error(f"[AI Task] {app.applicant.email} generated an exception: {exc}")
-                    errors.append(f"{app.applicant.email}: {str(exc)}")
+            futures_list = list(future_to_app.keys())
+            while futures_list:
+                # Active Cancellation check:
+                from django.db import connection
+                connection.close()
+                if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                    logger.info(f"[AI Task] Report {report_id} has been cancelled by user. Aborting task execution.")
+                    cancelled = True
+                    kill_threads_for_report(report_id)
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    JobApplication.objects.filter(id__in=app_ids, ai_score__isnull=True).update(status="PENDING")
+                    return {"status": "cancelled"}
+
+                done, not_done = wait(futures_list, timeout=1.0, return_when=FIRST_COMPLETED)
+                for future in done:
+                    futures_list.remove(future)
+                    app = future_to_app[future]
+                    try:
+                        app_id, score, analysis_json = future.result()
+                        results_map[app_id] = (score, analysis_json)
+                    except Exception as exc:
+                        logger.error(f"[AI Task] {app.applicant.email} generated an exception: {exc}")
+                        errors.append(f"{app.applicant.email}: {str(exc)}")
+        finally:
+            if not cancelled:
+                executor.shutdown(wait=True)
 
         # 2. Sequential DB Updates (Ensures database integrity and avoids locks)
         for app in apps_to_screen:
+            from django.db import connection
+            connection.close()
+            if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                logger.info(f"[AI Task] Report {report_id} has been cancelled by user during DB updates. Aborting.")
+                JobApplication.objects.filter(id__in=app_ids, ai_score__isnull=True).update(status="PENDING")
+                return {"status": "cancelled"}
+
             if app.id not in results_map:
                 continue
             

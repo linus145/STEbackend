@@ -234,7 +234,7 @@ class AIService:
     # ─── World-Class ATS Resume Analysis ──────────────────────────────────
 
     @staticmethod
-    def analyze_resume(job_title, job_brief, resume_url, selected_model=None):
+    def analyze_resume(job_title, job_brief, resume_url, selected_model=None, report_id=None):
         """
         Two-pass enterprise ATS screening engine.
 
@@ -256,6 +256,17 @@ class AIService:
             if not api_key:
                 return None, "Gemini API key is not configured."
 
+        # Check cancellation before download
+        if report_id:
+            from django.db import connection
+            from AI.models import AIScreeningReport
+            try:
+                connection.close()
+                if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                    return None, "Cancelled"
+            except Exception as e:
+                print(f"[AI] Failed check before download: {e}")
+
         # ── Step 1: Download Resume PDF ────────────────────────────────────
         pdf_bytes, download_error = AIService.download_pdf(resume_url)
         if not pdf_bytes:
@@ -263,6 +274,18 @@ class AIService:
 
         # ── Step 1b: Extract Plain Text from PDF ────────────────────────────
         extracted_text = AIService.extract_text_from_pdf(pdf_bytes)
+
+        # Check cancellation after download & text extraction completes
+        if report_id:
+            from django.db import connection
+            from AI.models import AIScreeningReport
+            try:
+                connection.close()
+                if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                    print(f"[AI] Report {report_id} has been cancelled during download/extraction. Aborting.")
+                    return None, "Cancelled"
+            except Exception as e:
+                print(f"[AI] Failed check after download: {e}")
 
         # ── Step 2: Unpack & Enrich Job Brief ─────────────────────────────
         required_skills  = job_brief.get("required_skills", "Not specified")
@@ -766,12 +789,32 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
                 print(f"[AI] Calling Kimi API (model: {selected_model})...")
                 last_error = None
                 for attempt in range(1, 4):
+                    if report_id:
+                        from django.db import connection
+                        from AI.models import AIScreeningReport
+                        try:
+                            connection.close()
+                            if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                return None, "Cancelled"
+                        except Exception as e:
+                            print(f"[AI] Failed check in Kimi attempt: {e}")
                     try:
                         t0 = time.time()
                         kimi_response = AIService.call_kimi_api(prompt)
                         elapsed = time.time() - t0
                         print(f"[AI] Kimi responded in {elapsed:.1f}s")
                         
+                        if report_id:
+                            from django.db import connection
+                            from AI.models import AIScreeningReport
+                            try:
+                                connection.close()
+                                if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                    print(f"[AI] Report {report_id} has been cancelled. Aborting Kimi parser.")
+                                    return None, "Cancelled"
+                            except Exception as e:
+                                pass
+
                         if kimi_response:
                             score, analysis = AIService._parse_response(kimi_response)
                             if score is not None:
@@ -822,6 +865,15 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
             last_error = None
             for model_name, max_retries in pipeline:
                 for attempt in range(1, max_retries + 1):
+                    if report_id:
+                        from django.db import connection
+                        from AI.models import AIScreeningReport
+                        try:
+                            connection.close()
+                            if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                return None, "Cancelled"
+                        except Exception as e:
+                            print(f"[AI] Failed check in Gemini attempt: {e}")
                     try:
                         t0 = time.time()
                         print(f"[AI] Calling {model_name} (attempt {attempt})...")
@@ -839,6 +891,18 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
                         if response and response.text:
                             elapsed = time.time() - t0
                             print(f"[AI] {model_name} responded in {elapsed:.1f}s")
+
+                            if report_id:
+                                from django.db import connection
+                                from AI.models import AIScreeningReport
+                                try:
+                                    connection.close()
+                                    if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                        print(f"[AI] Report {report_id} has been cancelled. Aborting Gemini parser.")
+                                        return None, "Cancelled"
+                                except Exception as e:
+                                    pass
+
                             score, analysis = AIService._parse_response(response.text)
                             if score is not None:
                                 return score, analysis

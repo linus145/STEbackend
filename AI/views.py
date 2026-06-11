@@ -169,7 +169,7 @@ class AnalyzeResumesView(APIView, ResponseMixin):
 
         ten_minutes_ago = timezone.now() - timedelta(minutes=10)
         existing_report = AIScreeningReport.objects.filter(
-            job_id=job.id, results__status="processing"
+            job_id=job.id, results__status="processing", is_deleted=False
         ).first()
 
         # If a report is processing but older than 10 min, it's likely stuck — allow restart
@@ -306,8 +306,12 @@ class DeleteScreeningReportView(APIView, ResponseMixin):
                         status="REVIEWED"
                     ).update(status="PENDING")
 
+                # Set status to failed/cancelled in results so it doesn't block future checks
+                report.results["status"] = "failed"
+                report.results["error"] = "Cancelled by user"
+
             report.is_deleted = True
-            report.save(update_fields=["is_deleted"])
+            report.save(update_fields=["is_deleted", "results"])
             return self.build_response("success", "Report deleted.")
         except AIScreeningReport.DoesNotExist:
             return self.build_response(
