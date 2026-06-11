@@ -406,8 +406,17 @@ NOTIFICATION_DEFAULT_FROM_EMAIL = os.environ.get("NOTIFICATION_DEFAULT_FROM_EMAI
 # AI & External APIs
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 DEEPGRAM_API_KEY = os.environ.get("DEEPGRAM_API_KEY", "")
+
+#Azure models
 KIMI_API_KEY = os.environ.get("KIMI_API_KEY", "")
 AZUREPROJECT_ENDPOINT = os.environ.get("azureproject_endpiunt", "")
+AZURE_KIMI_ENDPOINT = os.environ.get("AZURE_KIMI_ENDPOINT", "")
+AZURE_KIMI_DEPLOYMENT = os.environ.get("AZURE_KIMI_DEPLOYMENT", "")
+GROK_API_KEY = os.environ.get("GROK_API_KEY", "")
+AZURE_GROK_ENDPOINT = os.environ.get("AZURE_GROK_ENDPOINT", "")
+AZURE_GROK_DEPLOYMENT = os.environ.get("AZURE_GROK_DEPLOYMENT", "")
+AZURE_GROK_ENDPOINT_2 = os.environ.get("AZURE_GROKENDPOINT2", "")
+AZURE_GROK_API_2 = os.environ.get("AZURE_GROK_API", "")
 
 # Caching Configuration
 if DEBUG:

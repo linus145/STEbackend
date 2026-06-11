@@ -182,12 +182,21 @@ class AIService:
         from django.conf import settings
 
         api_key = getattr(settings, "KIMI_API_KEY", None)
-        azure_endpoint = getattr(settings, "AZUREPROJECT_ENDPOINT", "")
+        azure_endpoint = getattr(settings, "AZURE_KIMI_ENDPOINT", "")
+        if not azure_endpoint:
+            azure_endpoint = getattr(settings, "AZUREPROJECT_ENDPOINT", "")
+
+        deployment_name = getattr(settings, "AZURE_KIMI_DEPLOYMENT", "")
+        if not deployment_name:
+            deployment_name = "Kimi-K2.6"
 
         if azure_endpoint:
             from urllib.parse import urlparse
             parsed = urlparse(azure_endpoint)
-            base_url = f"{parsed.scheme}://{parsed.netloc}/openai/v1"
+            if "/openai/v1" not in azure_endpoint and "/v1" not in azure_endpoint:
+                base_url = f"{parsed.scheme}://{parsed.netloc}/openai/v1"
+            else:
+                base_url = azure_endpoint
 
             if not api_key:
                 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
@@ -198,13 +207,13 @@ class AIService:
                     base_url=base_url,
                     api_key=token_provider
                 )
-                print("[AI] Initialized Kimi client using Azure Entra ID bearer token provider.")
+                print(f"[AI] Initialized Kimi client using Azure Entra ID bearer token provider. Endpoint: {base_url}")
             else:
                 client = OpenAI(
                     base_url=base_url,
                     api_key=api_key
                 )
-                print("[AI] Initialized Kimi client using Azure static API key.")
+                print(f"[AI] Initialized Kimi client using Azure static API key. Endpoint: {base_url}")
         else:
             if not api_key:
                 raise ValueError("Kimi API key is not configured.")
@@ -215,7 +224,109 @@ class AIService:
             print("[AI] Initialized Kimi client using Moonshot direct URL.")
 
         completion = client.chat.completions.create(
-            model="Kimi-K2.6",
+            model=deployment_name,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.0,
+            timeout=180.0
+        )
+
+        if completion.choices and len(completion.choices) > 0:
+            return completion.choices[0].message.content
+        else:
+            raise ValueError(f"Unexpected empty completion choices: {completion}")
+
+    @staticmethod
+    def call_grok_api(prompt):
+        """Calls Grok API using the official OpenAI client SDK with Azure AD or static key."""
+        from openai import OpenAI
+        from django.conf import settings
+
+        api_key = getattr(settings, "GROK_API_KEY", None)
+        endpoint = getattr(settings, "AZURE_GROK_ENDPOINT", "")
+        if not endpoint:
+            endpoint = "https://lakkavaramlinus-1936-resource.services.ai.azure.com/openai/v1"
+
+        deployment_name = getattr(settings, "AZURE_GROK_DEPLOYMENT", "")
+        if not deployment_name:
+            deployment_name = "grok-4-20-non-reasoning"
+
+        if not api_key:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(), "https://ai.azure.com/.default"
+            )
+            client = OpenAI(
+                base_url=endpoint,
+                api_key=token_provider
+            )
+            print("[AI] Initialized Grok client using Azure Entra ID bearer token provider.")
+        else:
+            client = OpenAI(
+                base_url=endpoint,
+                api_key=api_key
+            )
+            print("[AI] Initialized Grok client using Azure static API key.")
+
+        completion = client.chat.completions.create(
+            model=deployment_name,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.0,
+            timeout=180.0
+        )
+
+        if completion.choices and len(completion.choices) > 0:
+            return completion.choices[0].message.content
+        else:
+            raise ValueError(f"Unexpected empty completion choices: {completion}")
+
+    @staticmethod
+    def call_grok_4_1_api(prompt):
+        """Calls Grok 4.1 API using the official OpenAI client SDK with Azure AD or static key."""
+        from openai import OpenAI
+        from django.conf import settings
+
+        api_key = getattr(settings, "AZURE_GROK_API_2", None)
+        endpoint = getattr(settings, "AZURE_GROK_ENDPOINT_2", "")
+        deployment_name = "grok-4-1-fast-non-reasoning"
+
+        if not endpoint:
+            raise ValueError("Grok 4.1 endpoint is not configured.")
+
+        base_url = endpoint.split("/chat/completions")[0]
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        if "/openai/v1" not in base_url and "/v1" not in base_url:
+            base_url = f"{parsed.scheme}://{parsed.netloc}/openai/v1"
+
+        if not api_key:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            token_provider = get_bearer_token_provider(
+                DefaultAzureCredential(), "https://ai.azure.com/.default"
+            )
+            client = OpenAI(
+                base_url=base_url,
+                api_key=token_provider
+            )
+            print(f"[AI] Initialized Grok 4.1 client using Azure Entra ID token provider. Endpoint: {base_url}")
+        else:
+            client = OpenAI(
+                base_url=base_url,
+                api_key=api_key
+            )
+            print(f"[AI] Initialized Grok 4.1 client using Azure static API key. Endpoint: {base_url}")
+
+        completion = client.chat.completions.create(
+            model=deployment_name,
             messages=[
                 {
                     "role": "user",
@@ -248,9 +359,19 @@ class AIService:
         # Determine key to validate based on selected model
         if selected_model in ("kimi", "Kimi-K2.6"):
             api_key = getattr(settings, "KIMI_API_KEY", None)
-            azure_endpoint = getattr(settings, "AZUREPROJECT_ENDPOINT", "")
+            azure_endpoint = getattr(settings, "AZURE_KIMI_ENDPOINT", "") or getattr(settings, "AZUREPROJECT_ENDPOINT", "")
             if not api_key and not azure_endpoint:
                 return None, "Kimi API key or Azure project endpoint must be configured."
+        elif selected_model in ("grok", "grok-4-20-non-reasoning"):
+            api_key = getattr(settings, "GROK_API_KEY", None)
+            azure_endpoint = getattr(settings, "AZURE_GROK_ENDPOINT", "")
+            if not api_key and not azure_endpoint:
+                return None, "Grok API key or Azure Grok endpoint must be configured."
+        elif selected_model in ("grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"):
+            api_key = getattr(settings, "AZURE_GROK_API_2", None)
+            azure_endpoint = getattr(settings, "AZURE_GROK_ENDPOINT_2", "")
+            if not api_key and not azure_endpoint:
+                return None, "Grok 4.1 API key or Azure Grok 4.1 endpoint must be configured."
         else:
             api_key = getattr(settings, "GEMINI_API_KEY", None)
             if not api_key:
@@ -312,8 +433,8 @@ class AIService:
             salary_range = f"From {currency} {salary_min} per annum"
 
         try:
-            # ── Step 3: Initialize Client / Route Kimi ─────────────────────
-            if selected_model in ("kimi", "Kimi-K2.6"):
+            # ── Step 3: Initialize Client / Route Kimi / Grok ──────────────
+            if selected_model in ("kimi", "Kimi-K2.6", "grok", "grok-4-20-non-reasoning"):
                 client = None
                 pdf_part = None
             else:
@@ -785,6 +906,104 @@ Return ONLY valid JSON with NO markdown fences, NO prose before/after:
             prompt += speed_instruction
 
             # ── Step 5: Invoke AI Model / Pipeline ───────────────────
+            if selected_model in ("grok", "grok-4-20-non-reasoning"):
+                print(f"[AI] Calling Grok API (model: {selected_model})...")
+                last_error = None
+                for attempt in range(1, 4):
+                    if report_id:
+                        from django.db import connection
+                        from AI.models import AIScreeningReport
+                        try:
+                            connection.close()
+                            if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                return None, "Cancelled"
+                        except Exception as e:
+                            print(f"[AI] Failed check in Grok attempt: {e}")
+                    try:
+                        t0 = time.time()
+                        grok_response = AIService.call_grok_api(prompt)
+                        elapsed = time.time() - t0
+                        print(f"[AI] Grok responded in {elapsed:.1f}s")
+                        
+                        if report_id:
+                            from django.db import connection
+                            from AI.models import AIScreeningReport
+                            try:
+                                connection.close()
+                                if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                    print(f"[AI] Report {report_id} has been cancelled. Aborting Grok parser.")
+                                    return None, "Cancelled"
+                            except Exception as e:
+                                pass
+
+                        if grok_response:
+                            score, analysis = AIService._parse_response(grok_response)
+                            if score is not None:
+                                return score, analysis
+                            else:
+                                last_error = "Grok response parser returned None score"
+                        else:
+                            last_error = "Empty response from Grok"
+                    except Exception as e:
+                        last_error = str(e)
+                        print(f"[AI] Grok attempt {attempt} failed: {last_error}")
+                        if "429" in last_error or "rate" in last_error.lower() or "limit" in last_error.lower():
+                            sleep_time = attempt * 3
+                            print(f"[AI] Grok rate limit hit, sleeping {sleep_time}s")
+                            time.sleep(sleep_time)
+                        else:
+                            time.sleep(1)
+                return 0, f"Grok analysis failed: {last_error}"
+
+            if selected_model in ("grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"):
+                print(f"[AI] Calling Grok 4.1 API (model: {selected_model})...")
+                last_error = None
+                for attempt in range(1, 4):
+                    if report_id:
+                        from django.db import connection
+                        from AI.models import AIScreeningReport
+                        try:
+                            connection.close()
+                            if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                return None, "Cancelled"
+                        except Exception as e:
+                            print(f"[AI] Failed check in Grok 4.1 attempt: {e}")
+                    try:
+                        t0 = time.time()
+                        grok_response = AIService.call_grok_4_1_api(prompt)
+                        elapsed = time.time() - t0
+                        print(f"[AI] Grok 4.1 responded in {elapsed:.1f}s")
+                        
+                        if report_id:
+                            from django.db import connection
+                            from AI.models import AIScreeningReport
+                            try:
+                                connection.close()
+                                if not AIScreeningReport.objects.filter(id=report_id, is_deleted=False).exists():
+                                    print(f"[AI] Report {report_id} has been cancelled. Aborting Grok 4.1 parser.")
+                                    return None, "Cancelled"
+                            except Exception as e:
+                                pass
+
+                        if grok_response:
+                            score, analysis = AIService._parse_response(grok_response)
+                            if score is not None:
+                                return score, analysis
+                            else:
+                                last_error = "Grok 4.1 response parser returned None score"
+                        else:
+                            last_error = "Empty response from Grok 4.1"
+                    except Exception as e:
+                        last_error = str(e)
+                        print(f"[AI] Grok 4.1 attempt {attempt} failed: {last_error}")
+                        if "429" in last_error or "rate" in last_error.lower() or "limit" in last_error.lower():
+                            sleep_time = attempt * 3
+                            print(f"[AI] Grok 4.1 rate limit hit, sleeping {sleep_time}s")
+                            time.sleep(sleep_time)
+                        else:
+                            time.sleep(1)
+                return 0, f"Grok 4.1 analysis failed: {last_error}"
+
             if selected_model in ("kimi", "Kimi-K2.6"):
                 print(f"[AI] Calling Kimi API (model: {selected_model})...")
                 last_error = None

@@ -198,6 +198,9 @@ class AnalyzeResumesView(APIView, ResponseMixin):
         allowed_models = [
             "kimi",
             "Kimi-K2.6",
+            "grok",
+            "grok-4-20-non-reasoning",
+            "grok-4.1-non-reasoning",
             "gemini-3.5-flash",
             "gemini-3.5-flash-live",
             "gemini-3.0-flash-live",
