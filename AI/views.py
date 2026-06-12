@@ -434,7 +434,7 @@ class AIPlanChatView(APIView, ResponseMixin):
                     "2. Filter candidates based on required technical skill matrices.\n"
                     "3. Send invitation rounds using AI Interviews.\n\n"
                     "Let me know if you would like me to configure specific questions!\n\n"
-                    "Please change the active LLM engine model in settings to a different provider for better responses."
+                    "Please change the active AI model in settings to a different provider for better responses."
                 )
                 return self.build_response("success", "Reply generated (Fallback).", {"reply": fallback_text})
         else:
