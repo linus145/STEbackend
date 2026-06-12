@@ -328,14 +328,48 @@ class AIPlanChatView(APIView, ResponseMixin):
     def post(self, request):
         user_message = request.data.get("message", "").strip()
         history = request.data.get("history", [])
-        selected_model = request.data.get("model", "gemini-2.5-flash-lite").strip()
+
+        # Fetch model from settings
+        from agentsettings.models import AgentSettings
+        company = getattr(request.user, "company_profile", None)
+        startup = request.user.startups.first()
+        organization = None
+        if company:
+            from organization.models import Organization
+            organization, _ = Organization.objects.get_or_create(
+                company=company,
+                defaults={"name": company.company_name}
+            )
+        settings_obj, _ = AgentSettings.objects.get_or_create(
+            organization=organization,
+            startup=startup,
+            defaults={
+                "llm_model": "gemini-2.5-flash",
+                "max_iterations": 30,
+                "autonomy_level": "full_autonomy"
+            }
+        )
+        selected_model = settings_obj.llm_model if settings_obj else "gemini-2.5-flash"
+
+        # Check request override
+        req_model = request.data.get("model")
+        if req_model:
+            selected_model = req_model.strip()
+
         allowed_models = [
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
             "gemini-2.5-pro",
             "gemini-2.0-flash",
             "gemini-1.5-flash",
-            "gemini-1.5-pro"
+            "gemini-1.5-pro",
+            "kimi",
+            "Kimi-K2.6",
+            "grok",
+            "grok-4-20-non-reasoning",
+            "grok-4.20-non-reasoning",
+            "grok-4.1-non-reasoning",
+            "grok-4-1-fast-non-reasoning"
         ]
         if selected_model not in allowed_models:
             selected_model = "gemini-2.5-flash-lite"
@@ -366,18 +400,6 @@ class AIPlanChatView(APIView, ResponseMixin):
                 {"reply": "I'm sorry, but I can only answer questions about recruitment, applicant settings, and standard HR workflows."}
             )
 
-        api_key = getattr(settings, "GEMINI_API_KEY", None)
-        if not api_key:
-            # Standalone fallback hiring strategy
-            fallback_text = (
-                "I have compiled a custom hiring strategy for you:\n\n"
-                "1. Target matches on GitHub and LinkedIn with active profiles.\n"
-                "2. Filter candidates based on required technical skill matrices.\n"
-                "3. Send invitation rounds using AI Interviews.\n\n"
-                "Let me know if you would like me to configure specific questions!"
-            )
-            return self.build_response("success", "Reply generated (Fallback).", {"reply": fallback_text})
-
         # Dynamic Candidate Context Parsing & Injection
         candidate_context = request.data.get("candidate_context", None)
         context_str = ""
@@ -398,9 +420,48 @@ class AIPlanChatView(APIView, ResponseMixin):
                 context_str += f"- Knockout details: {candidate_context.get('knockout_reason')}\n"
             context_str += "\nUse this context when answering the user's questions about this candidate. Keep answers very brief, specific, and professional.\n\n"
 
+        is_gemini = selected_model not in (
+            "kimi", "Kimi-K2.6", "grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning",
+            "grok-4.1-non-reasoning", "grok-4-1-fast-non-reasoning"
+        )
+
+        if is_gemini:
+            api_key = getattr(settings, "GEMINI_API_KEY", None)
+            if not api_key:
+                fallback_text = (
+                    "I have compiled a custom hiring strategy for you:\n\n"
+                    "1. Target matches on GitHub and LinkedIn with active profiles.\n"
+                    "2. Filter candidates based on required technical skill matrices.\n"
+                    "3. Send invitation rounds using AI Interviews.\n\n"
+                    "Let me know if you would like me to configure specific questions!"
+                )
+                return self.build_response("success", "Reply generated (Fallback).", {"reply": fallback_text})
+        else:
+            if selected_model in ("kimi", "Kimi-K2.6"):
+                api_key = getattr(settings, "KIMI_API_KEY", None)
+                azure_endpoint = getattr(settings, "AZURE_KIMI_ENDPOINT", "") or getattr(settings, "AZUREPROJECT_ENDPOINT", "")
+                has_key = api_key or azure_endpoint
+            elif selected_model in ("grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning"):
+                api_key = getattr(settings, "GROK_API_KEY", None)
+                azure_endpoint = getattr(settings, "AZURE_GROK_ENDPOINT", "")
+                has_key = api_key or azure_endpoint
+            else:
+                api_key = getattr(settings, "AZURE_GROK_API_2", None)
+                azure_endpoint = getattr(settings, "AZURE_GROK_ENDPOINT_2", "")
+                has_key = api_key or azure_endpoint
+
+            if not has_key:
+                fallback_text = (
+                    "I have compiled a custom hiring strategy for you:\n\n"
+                    "1. Target matches on GitHub and LinkedIn with active profiles.\n"
+                    "2. Filter candidates based on required technical skill matrices.\n"
+                    "3. Send invitation rounds using AI Interviews.\n\n"
+                    "Let me know if you would like me to configure specific questions!"
+                )
+                return self.build_response("success", "Reply generated (Fallback).", {"reply": fallback_text})
+
         try:
             from Ahrmagent1.services.llm_planner import APP_KNOWLEDGE
-            client = _get_client(api_key)
 
             # Build authentic system instruction with strict character limit and application knowledge
             system_instruction = (
@@ -417,40 +478,68 @@ class AIPlanChatView(APIView, ResponseMixin):
                 "5. Avoid excessively long pleasantries. Be authentic, natural, and extremely brief. Do not exceed 500 characters."
             )
 
-            # Format history
-            contents = []
-            for item in history:
-                role = "user" if item.get("sender") == "user" else "model"
+            if not is_gemini:
+                # Format plain-text history context for Kimi/Grok
+                history_str = ""
+                for item in history:
+                    sender = "User" if item.get("sender") == "user" else "AI"
+                    history_str += f"{sender}: {item.get('text', '')}\n"
+
+                full_prompt = (
+                    f"System Instructions:\n{system_instruction}\n\n"
+                    f"Conversation History:\n{history_str}\n"
+                    f"User: {user_message}\n"
+                    f"AI:"
+                )
+
+                if selected_model in ("kimi", "Kimi-K2.6"):
+                    reply = AIService.call_kimi_api(full_prompt)
+                elif selected_model in ("grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning"):
+                    reply = AIService.call_grok_api(full_prompt)
+                else:
+                    reply = AIService.call_grok_4_1_api(full_prompt)
+
+                if reply:
+                    reply = reply[:500].strip()
+                else:
+                    reply = "I couldn't process that. Let's try formulating another strategy!"
+            else:
+                client = _get_client(api_key)
+
+                # Format history
+                contents = []
+                for item in history:
+                    role = "user" if item.get("sender") == "user" else "model"
+                    contents.append(
+                        types.Content(
+                            role=role,
+                            parts=[types.Part.from_text(text=item.get("text", ""))]
+                        )
+                    )
+
+                # Add current user message
                 contents.append(
                     types.Content(
-                        role=role,
-                        parts=[types.Part.from_text(text=item.get("text", ""))]
+                        role="user",
+                        parts=[types.Part.from_text(text=user_message)]
                     )
                 )
 
-            # Add current user message
-            contents.append(
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=user_message)]
+                response = client.models.generate_content(
+                    model=selected_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        max_output_tokens=150,  # Limits token footprint to strict character boundary (~125-150 tokens)
+                        temperature=0.7,
+                    ),
                 )
-            )
 
-            response = client.models.generate_content(
-                model=selected_model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    max_output_tokens=150,  # Limits token footprint to strict character boundary (~125-150 tokens)
-                    temperature=0.7,
-                ),
-            )
-
-            if response and response.text:
-                # Enforce absolute 500 character constraint on string slicing
-                reply = response.text[:500].strip()
-            else:
-                reply = "I couldn't process that. Let's try formulating another strategy!"
+                if response and response.text:
+                    # Enforce absolute 500 character constraint on string slicing
+                    reply = response.text[:500].strip()
+                else:
+                    reply = "I couldn't process that. Let's try formulating another strategy!"
 
             return self.build_response("success", "Reply generated.", {"reply": reply})
 
