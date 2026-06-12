@@ -17,36 +17,21 @@ logger = logging.getLogger("ai_rounds.evaluation")
 class AnswerEvaluation(BaseModel):
     """Schema for the AI evaluation response returned by Gemini."""
 
-    # Core backwards compatibility fields
-    score: int = Field(description="The overall score awarded to the candidate out of the maximum marks (out of 10, proportional to overall_score)")
-    feedback: str = Field(description="Constructive, professional feedback on the candidate's answer and evaluation reasoning combined")
-    key_points_missed: list[str] = Field(description="Key points or areas for improvement that the candidate missed, if any (must be empty for MCQ/options)")
-
-    # Enterprise Evaluation Engine fields
-    round_type: str = Field(description="The type of round being evaluated (e.g. TEXT, MCQ, MULTI_SELECT, CODE, VIDEO)")
-    technical_score: int = Field(description="Score for technical depth and correctness (0-10)")
-    communication_score: int = Field(description="Score for communication clarity and articulation (0-10)")
-    problem_solving_score: int = Field(description="Score for problem-solving capability (0-10)")
-    confidence_score: int = Field(description="Score for confidence level and certainty (0-10)")
-    architecture_score: int = Field(description="Score for architectural design and modularity, applicable for coding/system design (0-10)")
-    security_score: int = Field(description="Score for security and performance optimization (0-10)")
-    behavioral_score: int = Field(description="Score for behavioral fit and leadership indicators (0-10)")
-    overall_score: int = Field(description="The aggregated overall score (0-10)")
-    candidate_level_detected: str = Field(description="Claimed seniority level detected (Junior, Mid, Senior, Lead/Staff)")
-    topic_mastery: str = Field(description="Mastery level of the evaluated topic (e.g. Expert, Proficient, Vague, Shallow)")
-    strengths: list[str] = Field(description="Key strengths demonstrated in the response")
-    weaknesses: list[str] = Field(description="Weaknesses or technical gaps detected in the answer")
-    verified_skills: list[str] = Field(description="List of skills successfully verified by this answer")
-    missing_skills: list[str] = Field(description="Skills that remain unverified or missing")
-    red_flags: list[str] = Field(description="Any red flags, keyword stuffing, AI-generated styles, or bluffing detected")
-    cheating_probability: int = Field(description="Probability of cheating or copying (0 to 100)")
-    ai_generated_probability: int = Field(description="Probability of AI-generated answers or memorized tutorials (0 to 100)")
-    improvement_areas: list[str] = Field(description="Specific actionable areas where the candidate needs improvement")
-    follow_up_reason: str = Field(description="Reason why a follow-up question is generated or required")
-    next_question: str = Field(description="An intelligent, conversational follow-up question that challenges any shallow claims")
-    final_recommendation: str = Field(description="Final recommendation detail for hiring managers")
-    hire_decision: str = Field(description="Final hire decision status (e.g. HIRE, NO-HIRE, WATCH)")
-    confidence_summary: str = Field(description="Summary detailing the candidate's confidence pattern")
+    round_type: str = Field(description="The type of round (MCQ, MULTI_SELECT, TEXT, CODE, VIDEO)")
+    score: int = Field(description="The evaluated score out of 10 based on scoring rules")
+    technical_score: int = Field(description="Technical score (0-10)")
+    accuracy_score: int = Field(description="Accuracy score (0-10)")
+    communication_score: int = Field(description="Communication score (0-10)")
+    reasoning_score: int = Field(description="Reasoning score (0-10)")
+    overall_score: int = Field(description="Overall score (0-10)")
+    topic_mastery: str = Field(description="Topic mastery level")
+    strengths: list[str] = Field(description="Strengths of the response")
+    weaknesses: list[str] = Field(description="Weaknesses or gaps in the response")
+    key_points_missed: list[str] = Field(description="Key points missed by the candidate")
+    verified_concepts: list[str] = Field(description="Concepts successfully verified by the response")
+    missing_concepts: list[str] = Field(description="Concepts missing or incorrect in the response")
+    feedback: str = Field(description="Detailed constructive feedback")
+    evaluation_summary: str = Field(description="Summary of the evaluation")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -66,22 +51,7 @@ MCQ_TYPES = [
     'MULTIPLE CHOICE (MULTIPLE ANSWERS)',
 ]
 
-AI_EVALUATION_SYSTEM_INSTRUCTION = (
-    "You are an Enterprise-Level Autonomous AI Interview Evaluation Engine.\n\n"
-    "Your responsibility is to evaluate candidate answers with industry-grade hiring intelligence standards similar to senior recruiters, technical architects, and enterprise HR panels.\n\n"
-    "You are NOT a chatbot.\n"
-    "You are NOT a simple scorer.\n"
-    "You are a professional AI hiring evaluator.\n\n"
-    "GLOBAL EVALUATION RULES:\n"
-    "1. Always evaluate: technical depth, correctness, communication, reasoning, confidence, real-world understanding, problem-solving, seniority indicators, and consistency.\n"
-    "2. Detect: vague answers, memorized/tutorial responses, keyword stuffing, bluffing, hallucinated technical claims, AI-generated generic responses, and cheating indicators.\n"
-    "3. Never score based only on keywords.\n"
-    "4. Evaluate contextually based on: role, seniority, interview stage, round type, candidate history, and previous answers.\n"
-    "5. Adapt scoring expectations dynamically: junior, mid-level, senior, lead/staff.\n"
-    "6. Maintain enterprise hiring standards.\n"
-    "7. Focus on realistic recruiter-level evaluation quality.\n"
-    "8. Behave like a senior technical hiring panel."
-)
+AI_EVALUATION_SYSTEM_INSTRUCTION = "You are an Enterprise Examination Evaluation Engine."
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -354,37 +324,20 @@ class InterviewEvaluationService:
         # ── Build evaluation result ──
         evaluation_result = {
             "round_type": normalized_type,
-            "technical_score": final_score,
-            "communication_score": final_score,
-            "problem_solving_score": final_score,
-            "confidence_score": final_score,
-            "architecture_score": final_score,
-            "security_score": final_score,
-            "behavioral_score": final_score,
-            "overall_score": final_score,
             "score": final_score,
-            "feedback": feedback,
-            "key_points_missed": [],
-            "candidate_level_detected": round_obj.difficulty or "MID",
+            "technical_score": final_score,
+            "accuracy_score": final_score,
+            "communication_score": final_score,
+            "reasoning_score": final_score,
+            "overall_score": final_score,
             "topic_mastery": topic_mastery,
             "strengths": ["Correct option selected."] if is_correct else [],
             "weaknesses": [] if is_correct else ["Incorrect option selection."],
-            "verified_skills": [],
-            "missing_skills": [],
-            "red_flags": [],
-            "cheating_probability": 0,
-            "ai_generated_probability": 0,
-            "improvement_areas": [],
-            "follow_up_reason": "",
-            "next_question": "",
-            "final_recommendation": feedback,
-            "hire_decision": "HIRE" if final_score >= (question.marks * 0.7) else "NO-HIRE",
-            "confidence_summary": "Candidate selected option(s) confidently.",
-            "breakdown": {
-                "accuracy": final_score,
-                "depth": final_score,
-                "relevance": final_score,
-            },
+            "key_points_missed": [],
+            "verified_concepts": [],
+            "missing_concepts": [],
+            "feedback": feedback,
+            "evaluation_summary": feedback,
         }
 
         question.evaluation = evaluation_result
@@ -418,17 +371,17 @@ class InterviewEvaluationService:
             company = session.application.job.company if (session.application and session.application.job) else None
             model_name = AIBaseService.get_model_for_company(company)
 
-        prompt = f"""Evaluate the candidate's answer using the Enterprise AI Interview Evaluation Engine specifications.
+        ideal_answer = question.ideal_answer or "No ideal answer provided."
+        expected_topics = ", ".join(question.expected_topics) if isinstance(question.expected_topics, list) else "None"
+        mcq_options = json.dumps(question.mcq_options) if question.mcq_options else "None"
+
+        prompt = f"""You are an Enterprise Examination Evaluation Engine.
+
+Your responsibility is to evaluate candidate responses strictly according to the ROUND_TYPE.
 
 ==================================================
-INPUT VARIABLES
-==================================================
-
-ROLE:
-{role}
-
-EXPERIENCE_LEVEL:
-{experience_level}
+INPUT
+=====
 
 ROUND_TYPE:
 {round_type}
@@ -436,40 +389,121 @@ ROUND_TYPE:
 QUESTION:
 {question.question_text}
 
-EXPECTED_SKILLS:
-{expected_skills}
+IDEAL_ANSWER:
+{ideal_answer}
+
+EXPECTED_TOPICS:
+{expected_topics}
 
 CANDIDATE_ANSWER:
 {candidate_answer}
 
-PREVIOUS_CONVERSATION:
-{previous_conversation}
-
-SKILLS_ALREADY_VERIFIED:
-{skills_verified}
-
-CURRENT_TOPIC:
-{current_topic}
+MCQ_OPTIONS:
+{mcq_options}
 
 ==================================================
-EVALUATION LOGIC TO EXECUTE:
-==================================================
-For {round_type} Round Type:
-- TEXT / TYPING / CODE:
-  - Technical accuracy, structuring, scalability, optimizations, modularity, code quality, naming conventions, and anti-patterns.
-  - Assess if the answer matched the correct concepts fully or partially. Give the marks based upon the candidate's typed answer.
-  - Determine junior/mid/senior level indicators.
+ROUND TYPE RULES
+================
 
-- AI VOICE / VIDEO:
-  - Articulation depth, problem-solving, confidence, leadership, hesitation patterns, masteries.
+IF ROUND_TYPE = MCQ
+
+* Evaluate option selection only.
+* If selected option matches correct option exactly:
+  score = full marks.
+* Otherwise:
+  score = zero.
+* Do not use subjective evaluation.
+
+---
+
+IF ROUND_TYPE = MULTI_SELECT
+
+* Compare candidate selections against correct answers.
+* Award partial marks proportional to correct selections.
+* Deduct marks for incorrect selections.
+* Never award full marks unless all correct options are selected.
+
+---
+
+IF ROUND_TYPE = TEXT
+
+Evaluate:
+
+* Technical correctness
+* Conceptual understanding
+* Completeness
+* Relevance
+* Practical understanding
+* Logical reasoning
+* Clarity
+
+Determine:
+
+* What was answered correctly.
+* What was missed.
+* What misconceptions exist.
+
+---
+
+IF ROUND_TYPE = CODE
+
+Evaluate:
+
+* Functional correctness
+* Algorithm quality
+* Edge case handling
+* Complexity analysis
+* Security
+* Readability
+* Maintainability
+* Modularity
+
+Detect:
+
+* Syntax issues
+* Logical bugs
+* Anti-patterns
+
+---
+
+IF ROUND_TYPE = VIDEO
+
+Evaluate:
+
+* Communication
+* Technical knowledge
+* Confidence
+* Articulation
+* Problem solving
+* Leadership indicators
 
 ==================================================
-STRICT SCHEMATIC FIELD ALIGNMENT RULES:
+SCORING RULES
+=============
+
+0-10 scale.
+
+10 = Perfect answer
+
+8-9 = Strong answer
+
+6-7 = Good answer
+
+4-5 = Partial understanding
+
+2-3 = Weak understanding
+
+0-1 = Incorrect answer
+
+Never score based on answer length.
+
+Never score based on keywords alone.
+
+Always evaluate actual understanding.
+
 ==================================================
-- 'score': Must be an integer scale out of 10 representing the main marks (proportional to overall_score, e.g. 0 to 10). If the candidate is fully correct, give 10/10. If partially related, grade accordingly (e.g. 5/10).
-- 'feedback': Constructive feedback detailing your reasoning and overall hiring summary.
-- 'key_points_missed': Specific checklist of key missing items/improvement areas.
-- Ensure all other schema fields (red_flags, verified_skills, weaknesses, next_question, hire_decision, overall_score, technical_score, etc.) are strictly populated according to the schema!
+RETURN JSON ONLY
+================
 """
 
         is_gemini = model_name not in ("kimi", "Kimi-K2.6", "grok", "grok-4-20-non-reasoning", "grok-4.20-non-reasoning", "grok-4-1-fast-non-reasoning", "grok-4.1-non-reasoning")
@@ -477,33 +511,21 @@ STRICT SCHEMATIC FIELD ALIGNMENT RULES:
             prompt += (
                 "\n\nYou must return a JSON object exactly matching this structure:\n"
                 "{\n"
-                '  "score": 0, \n'
-                '  "feedback": "...", \n'
-                '  "key_points_missed": [], \n'
                 '  "round_type": "...", \n'
+                '  "score": 0, \n'
                 '  "technical_score": 0, \n'
+                '  "accuracy_score": 0, \n'
                 '  "communication_score": 0, \n'
-                '  "problem_solving_score": 0, \n'
-                '  "confidence_score": 0, \n'
-                '  "architecture_score": 0, \n'
-                '  "security_score": 0, \n'
-                '  "behavioral_score": 0, \n'
+                '  "reasoning_score": 0, \n'
                 '  "overall_score": 0, \n'
-                '  "candidate_level_detected": "...", \n'
                 '  "topic_mastery": "...", \n'
                 '  "strengths": [], \n'
                 '  "weaknesses": [], \n'
-                '  "verified_skills": [], \n'
-                '  "missing_skills": [], \n'
-                '  "red_flags": [], \n'
-                '  "cheating_probability": 0, \n'
-                '  "ai_generated_probability": 0, \n'
-                '  "improvement_areas": [], \n'
-                '  "follow_up_reason": "...", \n'
-                '  "next_question": "...", \n'
-                '  "final_recommendation": "...", \n'
-                '  "hire_decision": "HIRE", \n'
-                '  "confidence_summary": "..."\n'
+                '  "key_points_missed": [], \n'
+                '  "verified_concepts": [], \n'
+                '  "missing_concepts": [], \n'
+                '  "feedback": "...", \n'
+                '  "evaluation_summary": "..."\n'
                 "}\n"
             )
 

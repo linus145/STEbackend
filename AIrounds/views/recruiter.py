@@ -742,7 +742,8 @@ class EvaluateSessionView(APIView, ResponseMixin):
                 }
             )
 
-        session.overall_score = total_session_score
+        normalized_score = round((total_session_score / total_max_marks) * 100) if total_max_marks > 0 else 0
+        session.overall_score = normalized_score
         if unevaluated_count == 0 and total_max_marks > 0:
             session.status = "COMPLETED"
         session.save()
@@ -752,7 +753,7 @@ class EvaluateSessionView(APIView, ResponseMixin):
             "Score aggregation complete.",
             {
                 "session_id": str(session.id),
-                "overall_score": total_session_score,
+                "overall_score": normalized_score,
                 "total_max_marks": total_max_marks,
                 "unevaluated_count": unevaluated_count,
                 "rounds": results,

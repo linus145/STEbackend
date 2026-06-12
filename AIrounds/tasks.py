@@ -217,7 +217,8 @@ def task_bulk_evaluate(self, job_id, company_owner_id):
                         total_max += q.marks
                     rnd.round_score = round_score
                     rnd.save(update_fields=["round_score"])
-                session.overall_score = total_score
+                normalized_score = round((total_score / total_max) * 100) if total_max > 0 else 0
+                session.overall_score = normalized_score
                 if unevaluated == 0 and total_max > 0:
                     session.status = "COMPLETED"
                 session.save(update_fields=["overall_score", "status"])
