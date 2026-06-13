@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.generics import get_object_or_404, ListAPIView
 
-from jobs.models import JobPost, JobApplication, Skill, TalentPipeline
+from jobs.models import JobPost, JobApplication, Skill, TalentPipeline, SavedJob
 from jobs.serializers import (
     JobPostListSerializer,
     JobPostDetailSerializer,
@@ -16,6 +16,7 @@ from jobs.serializers import (
     JobApplicationStatusSerializer,
     SkillSerializer,
     TalentPipelineSerializer,
+    SavedJobSerializer,
 )
 from jobs.permissions import IsCompanyOwner, IsJobOwner
 from jobs.services import JobService
@@ -442,4 +443,81 @@ class TalentPipelineDetailView(APIView, ResponseMixin):
         entry.delete()
         return self.build_response(
             "success", "Removed from pipeline.", {}, status.HTTP_204_NO_CONTENT
+        )
+
+
+class SavedJobListView(ListAPIView, ResponseMixin):
+    """
+    GET: List all jobs saved by the authenticated user.
+    """
+    permission_classes = (IsAuthenticated,)
+    serializer_class = SavedJobSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        return SavedJob.objects.filter(
+            user=self.request.user,
+            job__is_deleted=False
+        ).select_related("job", "job__company")
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return self.build_response(
+            "success", "Saved jobs fetched.", serializer.data
+        )
+
+
+class SavedJobIdsView(APIView, ResponseMixin):
+    """
+    GET: Get all saved job IDs for the authenticated user.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        ids = list(SavedJob.objects.filter(
+            user=request.user,
+            job__is_deleted=False
+        ).values_list("job_id", flat=True))
+        # Convert UUID objects to strings
+        str_ids = [str(id) for id in ids]
+        return self.build_response(
+            "success",
+            "Saved job IDs fetched.",
+            {"saved_job_ids": str_ids}
+        )
+
+
+class ToggleSaveJobView(APIView, ResponseMixin):
+    """
+    POST: Toggle saving/unsaving of a job post by the authenticated user.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, job_id):
+        job = get_object_or_404(JobPost, id=job_id, is_deleted=False)
+        saved_job, created = SavedJob.objects.get_or_create(
+            user=request.user,
+            job=job
+        )
+
+        if not created:
+            # If it already existed, we unsave it
+            saved_job.delete()
+            return self.build_response(
+                "success",
+                "Job unsaved successfully.",
+                {"saved": False, "job_id": str(job_id)}
+            )
+        
+        return self.build_response(
+            "success",
+            "Job saved successfully.",
+            {"saved": True, "job_id": str(job_id)},
+            status_code=status.HTTP_201_CREATED
         )

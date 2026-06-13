@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from startups.serializers import CompanyProfileSerializer, CompanyHRProfileSerializer
 from startups.models import CompanyHRProfile
-from jobs.models import JobPost, JobApplication, Skill, TalentPipeline
+from jobs.models import JobPost, JobApplication, Skill, TalentPipeline, SavedJob
 
 
 class SkillSerializer(serializers.ModelSerializer):
@@ -306,3 +306,13 @@ class TalentPipelineSerializer(serializers.ModelSerializer):
         model = TalentPipeline
         fields = ("id", "talent", "added_at", "status", "notes")
         read_only_fields = ("id", "added_at")
+
+
+class SavedJobSerializer(serializers.ModelSerializer):
+    """Serializer for the SavedJob model."""
+    job = JobPostListSerializer(read_only=True)
+
+    class Meta:
+        model = SavedJob
+        fields = ("id", "job", "created_at")
+        read_only_fields = ("id", "job", "created_at")
