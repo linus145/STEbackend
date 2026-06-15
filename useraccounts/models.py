@@ -110,3 +110,25 @@ class WsTicket(models.Model):
         # Tickets expire after 30 seconds
         expiration_time = self.created_at + timezone.timedelta(seconds=30)
         return not self.is_used and timezone.now() < expiration_time
+
+
+class UserSkill(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name="user_skills",
+        db_index=True,
+    )
+    name = models.CharField(max_length=100)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "User Skill"
+        verbose_name_plural = "User Skills"
+        unique_together = ("user", "name")
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return f"{self.user.email} - {self.name}"
+

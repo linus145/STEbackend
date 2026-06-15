@@ -192,9 +192,19 @@ class ProfileView(APIView, RequestResponseMixin):
         data = request.data
 
         # Split data into user fields and profile fields
-        user_fields = ["first_name", "last_name", "phone_number"]
+        user_fields = ["first_name", "last_name", "phone_number", "is_open_to_work", "is_hiring"]
         user_data = {k: v for k, v in data.items() if k in user_fields}
         profile_data = {k: v for k, v in data.items() if k not in user_fields}
+
+        # Sync UserSkill table
+        skills_data = profile_data.pop("skills", None)
+        if skills_data is not None:
+            user.user_skills.all().delete()
+            from useraccounts.models import UserSkill
+            for s_name in skills_data:
+                if s_name.strip():
+                    UserSkill.objects.get_or_create(user=user, name=s_name.strip())
+
 
         # Update User
         if user_data:

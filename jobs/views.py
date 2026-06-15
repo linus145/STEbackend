@@ -287,8 +287,9 @@ class SkillListView(APIView, ResponseMixin):
 
     def get_permissions(self):
         if self.request.method == "POST":
-            return [IsAuthenticated(), IsCompanyOwner()]
+            return [IsAuthenticated()]
         return [AllowAny()]
+
 
     def get(self, request):
         category = request.query_params.get("category")

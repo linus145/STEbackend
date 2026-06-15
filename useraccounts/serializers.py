@@ -8,6 +8,7 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     profile = serializers.SerializerMethodField()
+    skills = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -15,9 +16,13 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'email', 'phone_number', 'first_name', 
             'last_name', 'role', 'is_active', 'is_verified', 
             'profile', 'created_at', 'updated_at',
-            'secondary_email', 'third_email', 'is_2fa_enabled'
+            'secondary_email', 'third_email', 'is_2fa_enabled',
+            'is_open_to_work', 'is_hiring', 'skills'
         )
         read_only_fields = ('id', 'is_active', 'is_verified', 'created_at', 'updated_at')
+
+    def get_skills(self, obj):
+        return list(obj.user_skills.values_list('name', flat=True))
 
     def get_profile(self, obj):
         from interactions.serializers import MentorProfileSerializer
