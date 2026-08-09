@@ -30,16 +30,14 @@ class LogViolationView(APIView):
             interview_session = InterviewSession.objects.get(id=session_id)
             
             is_authorized = False
-            if request.user and not request.user.is_anonymous:
+            if interview_session.status == 'ACTIVE':
+                is_authorized = True
+            elif request.user and not request.user.is_anonymous:
                 if request.user.is_staff or request.user.is_superuser:
                     is_authorized = True
                 elif interview_session.candidate == request.user:
                     is_authorized = True
                 elif hasattr(request.user, 'company_profile') and interview_session.application and interview_session.application.job.company == request.user.company_profile:
-                    is_authorized = True
-            else:
-                # Allow anonymous candidate requests if the session is active (meaning exam is in progress)
-                if interview_session.status == 'ACTIVE':
                     is_authorized = True
                     
             if not is_authorized:

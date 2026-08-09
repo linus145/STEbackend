@@ -116,6 +116,7 @@ class InterviewRound(models.Model):
         ("MULTI_SELECT", "Multiple Choice (Multiple Answers)"),
         ("CODE", "Code / Programming"),
         ("VIDEO", "AI Voice/Video Interview"),
+        ("ONLINE_INTERVIEW", "Online In-Person Interview"),
     ]
 
     PROGRAMMING_LANGUAGE_CHOICES = [
@@ -207,6 +208,7 @@ class InterviewQuestion(models.Model):
         ("MULTI_SELECT", "Multiple Select"),
         ("CODE", "Code / Programming"),
         ("VIDEO", "AI Voice/Video Interview"),
+        ("ONLINE_INTERVIEW", "Online In-Person Interview"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

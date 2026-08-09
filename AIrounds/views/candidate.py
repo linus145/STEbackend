@@ -39,6 +39,59 @@ class CandidateExamAccessView(APIView, ResponseMixin):
                     InterviewEngineService.generate_next_question(str(session.id), str(rnd.id))
                 except Exception as e:
                     logger.error(f"Error generating dynamic first question: {e}")
+            elif rnd.question_format == 'ONLINE_INTERVIEW' and rnd.questions.count() == 0:
+                try:
+                    from AIrounds.services.engine_service import InterviewEngineService
+                    application_id = str(session.application.id) if session.application else None
+                    if application_id:
+                        coding_topics = rnd.settings.get('coding_topics') if isinstance(rnd.settings, dict) else None
+                        coding_frameworks = rnd.settings.get('coding_frameworks') if isinstance(rnd.settings, dict) else None
+                        count = rnd.max_questions or 5
+                        
+                        questions = InterviewEngineService.generate_question_pool(
+                            application_id=application_id,
+                            round_type=rnd.round_type or rnd.designation,
+                            designation=rnd.designation,
+                            difficulty=rnd.difficulty,
+                            round_category=rnd.round_category or 'NON_CODING',
+                            question_format='TEXT',
+                            programming_language=rnd.programming_language or '',
+                            count=count,
+                            coding_topics=coding_topics,
+                            coding_frameworks=coding_frameworks
+                        )
+                        
+                        for q_idx, q_data in enumerate(questions):
+                            if isinstance(q_data, dict):
+                                q_text = q_data.get('question')
+                                q_ideal = q_data.get('ideal_answer')
+                            else:
+                                q_text = q_data
+                                q_ideal = None
+                                
+                            InterviewQuestion.objects.create(
+                                round=rnd,
+                                question_text=q_text,
+                                ideal_answer=q_ideal,
+                                question_type='ONLINE_INTERVIEW',
+                                marks=10
+                            )
+                    else:
+                        InterviewQuestion.objects.create(
+                            round=rnd,
+                            question_text="Face-to-Face Online Interview in progress. Recruiter will ask questions live.",
+                            question_type="ONLINE_INTERVIEW",
+                            marks=10
+                        )
+                except Exception as e:
+                    logger.error(f"Error creating online interview questions: {e}")
+                    if rnd.questions.count() == 0:
+                        InterviewQuestion.objects.create(
+                            round=rnd,
+                            question_text="Face-to-Face Online Interview in progress. Recruiter will ask questions live.",
+                            question_type="ONLINE_INTERVIEW",
+                            marks=10
+                        )
 
             questions = []
             for q in rnd.questions.all().order_by('asked_at'):
@@ -146,6 +199,18 @@ class CandidateExamLoginView(APIView, ResponseMixin):
 
         session = link.session
 
+        # Start the exam session on login
+        from django.utils import timezone
+        if link.status == 'ACTIVE':
+            link.status = 'STARTED'
+            link.started_at = timezone.now()
+            link.ip_address = request.META.get('REMOTE_ADDR')
+            link.user_agent = request.META.get('HTTP_USER_AGENT', '')
+            link.save(update_fields=['status', 'started_at', 'ip_address', 'user_agent'])
+
+            session.status = 'ACTIVE'
+            session.save(update_fields=['status'])
+
         # Build full exam payload
         rounds_data = []
         for rnd in session.rounds.all().order_by('created_at'):
@@ -155,6 +220,59 @@ class CandidateExamLoginView(APIView, ResponseMixin):
                     InterviewEngineService.generate_next_question(str(session.id), str(rnd.id))
                 except Exception as e:
                     logger.error(f"Error generating dynamic first question: {e}")
+            elif rnd.question_format == 'ONLINE_INTERVIEW' and rnd.questions.count() == 0:
+                try:
+                    from AIrounds.services.engine_service import InterviewEngineService
+                    application_id = str(session.application.id) if session.application else None
+                    if application_id:
+                        coding_topics = rnd.settings.get('coding_topics') if isinstance(rnd.settings, dict) else None
+                        coding_frameworks = rnd.settings.get('coding_frameworks') if isinstance(rnd.settings, dict) else None
+                        count = rnd.max_questions or 5
+                        
+                        questions = InterviewEngineService.generate_question_pool(
+                            application_id=application_id,
+                            round_type=rnd.round_type or rnd.designation,
+                            designation=rnd.designation,
+                            difficulty=rnd.difficulty,
+                            round_category=rnd.round_category or 'NON_CODING',
+                            question_format='TEXT',
+                            programming_language=rnd.programming_language or '',
+                            count=count,
+                            coding_topics=coding_topics,
+                            coding_frameworks=coding_frameworks
+                        )
+                        
+                        for q_idx, q_data in enumerate(questions):
+                            if isinstance(q_data, dict):
+                                q_text = q_data.get('question')
+                                q_ideal = q_data.get('ideal_answer')
+                            else:
+                                q_text = q_data
+                                q_ideal = None
+                                
+                            InterviewQuestion.objects.create(
+                                round=rnd,
+                                question_text=q_text,
+                                ideal_answer=q_ideal,
+                                question_type='ONLINE_INTERVIEW',
+                                marks=10
+                            )
+                    else:
+                        InterviewQuestion.objects.create(
+                            round=rnd,
+                            question_text="Face-to-Face Online Interview in progress. Recruiter will ask questions live.",
+                            question_type="ONLINE_INTERVIEW",
+                            marks=10
+                        )
+                except Exception as e:
+                    logger.error(f"Error creating online interview questions: {e}")
+                    if rnd.questions.count() == 0:
+                        InterviewQuestion.objects.create(
+                            round=rnd,
+                            question_text="Face-to-Face Online Interview in progress. Recruiter will ask questions live.",
+                            question_type="ONLINE_INTERVIEW",
+                            marks=10
+                        )
 
             questions = []
             for q in rnd.questions.all().order_by('asked_at'):

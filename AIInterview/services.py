@@ -66,7 +66,7 @@ INTERVIEW CONTEXT:
         prompt += f"""
 YOUR BEHAVIOR:
 1. You are a warm but professional interviewer. Speak naturally like a real human — use conversational language, brief affirmations ("Great point", "I see", "Interesting").
-2. Start by introducing yourself briefly and asking the first interview question relevant to the {round_designation} round.
+2. Only introduce yourself briefly in the initial greeting. For all subsequent turns, DO NOT introduce yourself, say 'I am Sophia', or mention you are an AI. Respond or ask the next question directly.
 3. Listen carefully to the candidate's answer. Evaluate their response internally for:
    - Technical accuracy and depth
    - Communication clarity
@@ -90,7 +90,7 @@ ROUND-SPECIFIC FOCUS for "{round_designation}":
         if programming_language:
             prompt += f"- For this coding round, prioritize evaluation and questions related to the {programming_language} programming language.\n"
 
-        prompt += "\nBegin the interview now. Introduce yourself and ask the first question."
+        prompt += "\nBegin the interview now. (If this is the initial greeting, introduce yourself and ask the first question. If you are responding to a message in the chat history, do not introduce yourself again)."
 
         # ─── Construct Settings JSON payload ───
         settings_payload = {
@@ -147,7 +147,7 @@ ROUND-SPECIFIC FOCUS for "{round_designation}":
         return settings_payload
 
     @staticmethod
-    def split_voice_transcript(transcript):
+    def split_voice_transcript(transcript, model_name="gemini-2.5-flash"):
         """
         Parses a dynamic voice dialogue transcript into structured question-answer pairs using Gemini.
         """
@@ -165,7 +165,8 @@ ROUND-SPECIFIC FOCUS for "{round_designation}":
             response_text = AIBaseService.generate_content(
                 prompt=prompt,
                 system_instruction="You are a precise data parsing assistant. Output strictly valid JSON arrays.",
-                temperature=0.1
+                temperature=0.1,
+                model_name=model_name
             )
             cleaned_text = response_text
             if "```json" in response_text:

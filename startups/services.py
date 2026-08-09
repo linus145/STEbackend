@@ -32,10 +32,15 @@ class StartupService:
     def authenticate_company(email, password):
         """
         Handles company-specific authentication and shadow user logic.
+        Supports standard company password, owner password, and user fallback.
         """
+        from django.contrib.auth import authenticate as django_authenticate
+        
         try:
             company = CompanyProfile.objects.get(company_email=email)
-            if company.check_company_password(password):
+            
+            # 1. Try company-specific password first
+            if company.company_password and company.check_company_password(password):
                 if not company.owner:
                     with transaction.atomic():
                         shadow_user = User.objects.create_user(
@@ -48,8 +53,31 @@ class StartupService:
                         company.owner = shadow_user
                         company.save()
                 return company.owner, company
+                
+            # 2. Try owner's account password
+            if company.owner:
+                authenticated_user = django_authenticate(email=company.owner.email, password=password)
+                if authenticated_user == company.owner:
+                    return company.owner, company
+                    
+            # 3. Try standard user account with matching email
+            user_exists = User.objects.filter(email=email).first()
+            if user_exists:
+                authenticated_user = django_authenticate(email=email, password=password)
+                if authenticated_user == user_exists:
+                    if not company.owner:
+                        company.owner = user_exists
+                        company.save()
+                    return user_exists, company
+                    
             return None, None
         except CompanyProfile.DoesNotExist:
+            # 4. Fallback if no company has this email, but a user account does and has a company profile
+            user = User.objects.filter(email=email).first()
+            if user:
+                authenticated_user = django_authenticate(email=email, password=password)
+                if authenticated_user == user and hasattr(user, 'company_profile'):
+                    return user, user.company_profile
             return None, None
 
     @staticmethod

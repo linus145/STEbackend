@@ -278,13 +278,16 @@ urlpatterns = [
     path("api/hrmagent2/", include("Ahrmagent2.urls")),
     path("api/agentsettings/", include("agentsettings.urls")),
 
+    #agent task-execution
+    path("api/agenttaskexecution/",include("agenttask1.urls")),
+
     #HR
     path("api/employees/", include("employees.urls")),
     path("api/attendance/", include("attendance.urls")),
     path("api/leave_management/", include("leave_management.urls")),
     path("api/organization/", include("organization.urls")),
     path("api/payroll/", include("payroll.urls")),
-    path("api/api/payroll/", include("payroll.urls")),
+    # path("api/api/payroll/", include("payroll.urls")),  # Duplicate route commented out
     path("api/performance/", include("performance.urls")),
     path("api/search/", include("searchfilters.urls")),
     path("api/credits/", include("creditsystem.urls")),

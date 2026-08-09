@@ -113,6 +113,7 @@ INSTALLED_APPS = [
     "Ahrmagent1",
     "Ahrmagent2",
     "agentsettings",
+    "agenttask1",
     
 
     #HR

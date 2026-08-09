@@ -10,8 +10,14 @@ def task_split_and_save_voice_transcript(question_id, answer):
     Celery task to offload dynamic voice dialogue splitting and DB record creation in the background.
     """
     try:
+        from AIrounds.models import InterviewQuestion
+        from AIrounds.services.ai_base import AIBaseService
+        q = InterviewQuestion.objects.select_related('round__session__application__job').get(id=question_id)
+        company = q.round.session.application.job.company if (q.round.session.application and q.round.session.application.job) else None
+        model_name = AIBaseService.get_model_for_company(company)
+
         logger.info(f"Starting Celery voice transcript split task for question {question_id}...")
-        pairs = AIInterviewService.split_voice_transcript(answer)
+        pairs = AIInterviewService.split_voice_transcript(answer, model_name=model_name)
         AIInterviewService.save_split_transcript(question_id, pairs)
         logger.info(f"Successfully split and saved transcript for question {question_id}.")
         return f"Successfully split transcript for question {question_id}."

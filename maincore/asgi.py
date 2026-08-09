@@ -16,13 +16,18 @@ django_asgi_app = get_asgi_application()
 
 from channels.routing import ProtocolTypeRouter, URLRouter
 from maincore.middleware import JWTAuthMiddleware
-from chat.routing import websocket_urlpatterns
+from chat.routing import websocket_urlpatterns as chat_ws_urlpatterns
+from AIInterview.routing import websocket_urlpatterns as webrtc_ws_urlpatterns
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": JWTAuthMiddleware(
         URLRouter(
-            websocket_urlpatterns
+            # WebRTC signaling — no auth needed (consumer accepts all, room is UUID-secured)
+            webrtc_ws_urlpatterns
+            +
+            # Chat — JWT auth required (consumer checks scope['user'].is_authenticated)
+            chat_ws_urlpatterns
         )
     ),
 })
