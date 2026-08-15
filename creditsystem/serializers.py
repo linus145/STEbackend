@@ -9,7 +9,7 @@ class UserCreditSerializer(serializers.ModelSerializer):
 class CreditTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = CreditTransaction
-        fields = ("id", "amount", "activity_type", "description", "created_at")
+        fields = ("id", "amount", "activity_type", "description", "metadata", "created_at")
 
 class UserCreditAdminSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
