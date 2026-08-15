@@ -301,17 +301,40 @@ REST_FRAMEWORK = {
         "maincore.throttling.UserBurstThrottle",
         "maincore.throttling.UserSustainedThrottle",
     ],
+    # "DEFAULT_THROTTLE_RATES": {
+    #     "anon_burst": "60/min",
+    #     "anon_sustained": "2000/hour",
+    #     "user_burst": "600/min",
+    #     "user_sustained": "20000/hour",
+    #     "login_burst": "10/min",
+    #     "login_sustained": "100/hour",
+    #     "otp_request": "5/hour",
+    #     "otp_verify": "10/hour",
+    #     "log_violation": "60/min",
+    #     "code_execution": "15/min",
+    # },
     "DEFAULT_THROTTLE_RATES": {
-        "anon_burst": "30/min",
-        "anon_sustained": "1000/hour",
-        "user_burst": "120/min",
-        "user_sustained": "5000/hour",
-        "login_burst": "5/min",
-        "login_sustained": "100/hour",
-        "otp_request": "5/hour",
-        "otp_verify": "10/hour",
-        "log_violation": "60/min",
+        # Anonymous endpoints (Public job boards, landing APIs)
+        "anon_burst": "120/min",        # 2 req/sec to absorb asset/parallel fetches
+        "anon_sustained": "3000/hour",
+
+        # Authenticated users (Dashboard, ATS pipelines)
+        "user_burst": "600/min",        # 10 req/sec (covers active tab polling)
+        "user_sustained": "25000/day",  # Standard daily quota
+
+        # Authentication endpoints (Scoped by IP + Email)
+        "login_burst": "5/min",         # Per account/IP pair
+        "login_sustained": "30/hour",
+
+        # OTP Security (Scoped by Phone / Email)
+        "otp_request": "3/min",        # Cooldown to prevent rapid spam
+        "otp_request_daily": "10/day",  # Protects SMS vendor costs (Twilio/AWS SNS)
+        "otp_verify": "5/min",         # Prevents brute-forcing 4/6-digit tokens
+
+        # Heavy Resource / Background Tasks
         "code_execution": "15/min",
+        "resume_parsing": "20/min",
+        "ai_voice_screening": "5/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",

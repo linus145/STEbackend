@@ -228,16 +228,60 @@ class InvitationsView(ListAPIView):
         return Response(serializer.data)
 
 
+class PendingSentRequestsView(ListAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = UserSerializer
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        # Fetch users to whom current user sent PENDING connection requests
+        return User.objects.filter(
+            received_connections__sender=self.request.user,
+            received_connections__status=Connection.STATUS_PENDING
+        ).select_related('founder_profile', 'investor_profile')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        page = self.paginate_queryset(queryset)
+        
+        connections = Connection.objects.filter(
+            sender=request.user,
+            status=Connection.STATUS_PENDING
+        )
+        connection_map = {
+            str(conn.receiver_id): {
+                "id": str(conn.id),
+                "status": conn.status,
+                "is_incoming": False,
+                "sender_id": str(conn.sender_id),
+                "created_at": conn.created_at
+            } for conn in connections
+        }
+
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            for user_data in serializer.data:
+                user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        for user_data in serializer.data:
+            user_data["connection_info"] = connection_map.get(str(user_data["id"]))
+        return Response(serializer.data)
+
+
 class DisconnectView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def delete(self, request, pk):
         try:
-            # pk is the other user's ID
+            # pk is either the target user's ID or the connection ID
             connection = Connection.objects.filter(
                 (
                     models.Q(sender=request.user, receiver_id=pk)
                     | models.Q(sender_id=pk, receiver=request.user)
+                    | models.Q(id=pk, sender=request.user)
+                    | models.Q(id=pk, receiver=request.user)
                 )
             ).first()
 
@@ -306,7 +350,7 @@ class ConnectionRequestView(APIView):
         ).first()
 
         if connection:
-            if connection.is_deleted or connection.status == Connection.STATUS_DISCONNECTED:
+            if connection.is_deleted or connection.status in [Connection.STATUS_DISCONNECTED, Connection.STATUS_REJECTED]:
                 # Restore or reset the connection for a new request
                 if connection.is_deleted:
                     connection.restore()

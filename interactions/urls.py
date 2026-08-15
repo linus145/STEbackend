@@ -12,7 +12,9 @@ urlpatterns = [
     path('network/people/', views.NetworkPeopleView.as_view(), name='network-people'),
     path('network/my-connections/', views.MyConnectionsView.as_view(), name='my-connections'),
     path('network/invitations/', views.InvitationsView.as_view(), name='network-invitations'),
+    path('network/pending-sent/', views.PendingSentRequestsView.as_view(), name='network-pending-sent'),
     path('network/connect/', views.ConnectionRequestView.as_view(), name='network-connect'),
     path('network/connect/<uuid:pk>/', views.ConnectionRequestView.as_view(), name='network-connect-detail'),
     path('network/disconnect/<uuid:pk>/', views.DisconnectView.as_view(), name='network-disconnect'),
 ]
+
