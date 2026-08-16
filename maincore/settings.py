@@ -101,6 +101,8 @@ INSTALLED_APPS = [
     "publicpages",
     "analytics",
     "creditsystem",
+    "following",
+
     
     #AI
     "AI",
