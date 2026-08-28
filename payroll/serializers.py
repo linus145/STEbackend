@@ -29,29 +29,34 @@ class EmployeeDeductionSerializer(serializers.ModelSerializer):
         fields = ['id', 'deduction', 'deduction_name', 'amount']
 
 def resolve_employee_id_in_data(data):
-    if 'employee' in data:
-        emp_val = data['employee']
-        if emp_val:
-            emp_val = str(emp_val).strip()
-            import uuid
-            is_uuid = False
-            try:
-                uuid.UUID(emp_val)
-                is_uuid = True
-            except ValueError:
-                pass
-            
-            if not is_uuid:
-                from employees.models import Employee
+    if hasattr(data, 'copy'):
+        data = data.copy()
+    emp_val = data.get('employee') or data.get('employee_id')
+    if emp_val:
+        emp_val = str(emp_val).strip()
+        import uuid
+        is_uuid = False
+        try:
+            uuid.UUID(emp_val)
+            is_uuid = True
+        except ValueError:
+            pass
+        
+        from employees.models import Employee
+        if is_uuid:
+            emp_obj = Employee.all_objects.filter(id=emp_val).first()
+            if not emp_obj:
                 emp_obj = Employee.all_objects.filter(employee_id=emp_val).first()
-                if emp_obj:
-                    if hasattr(data, 'copy'):
-                        data = data.copy()
-                    data['employee'] = str(emp_obj.id)
-                else:
-                    raise serializers.ValidationError({
-                        'employee': f"Employee with ID '{emp_val}' does not exist."
-                    })
+        else:
+            emp_obj = Employee.all_objects.filter(employee_id=emp_val).first()
+            
+        if emp_obj:
+            data['employee'] = str(emp_obj.id)
+            data['employee_id'] = str(emp_obj.id)
+        else:
+            raise serializers.ValidationError({
+                'employee': f"Employee with ID '{emp_val}' does not exist."
+            })
     return data
 
 from django.utils import timezone
@@ -72,7 +77,7 @@ class SalaryStructureSerializer(serializers.ModelSerializer):
         model = SalaryStructure
         fields = [
             'id', 'employee', 'employee_code', 'employee_name', 'employee_last_name', 'employee_designation', 'is_employee_deleted', 'basic_salary', 'hra', 
-            'overtime_rate', 'tax_percentage', 'pf_percentage', 'esi_percentage', 
+            'overtime_rate', 'tax_percentage', 'pf_percentage', 'esi_percentage', 'deduct_absent_leaves',
             'effective_from', 'status', 'employee_allowances', 'employee_deductions', 
             'created_at', 'updated_at'
         ]

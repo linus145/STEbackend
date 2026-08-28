@@ -13,6 +13,14 @@ class Post(SoftDeleteModel):
         related_name="posts",
         db_index=True,
     )
+    company_page = models.ForeignKey(
+        "comppages.CompanyPage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feed_posts",
+        db_index=True,
+    )
     content = models.TextField()
     media_url = models.URLField(max_length=500, blank=True, null=True)
 
@@ -23,6 +31,7 @@ class Post(SoftDeleteModel):
     visibility = models.CharField(
         max_length=10, choices=VISIBILITY_CHOICES, default="PUBLIC", db_index=True
     )
+    is_promoted = models.BooleanField(default=False, db_index=True)
 
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

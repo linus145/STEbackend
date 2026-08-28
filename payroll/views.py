@@ -129,6 +129,22 @@ class SalaryStructureViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         return super().get_queryset().select_related("employee").prefetch_related("employeeallowance_set", "employeededuction_set")
 
+    def create(self, request, *args, **kwargs):
+        from payroll.serializers import resolve_employee_id_in_data
+        data = resolve_employee_id_in_data(request.data)
+        emp_id = data.get("employee")
+        if emp_id:
+            existing = SalaryStructure.objects.filter(employee_id=emp_id).first()
+            if existing:
+                serializer = self.get_serializer(existing, data=data, partial=True)
+                serializer.is_valid(raise_exception=True)
+                self.perform_update(serializer)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     def destroy(self, request, *args, **kwargs):
         """
         Permanently hard-deletes the salary structure from the database.
@@ -421,12 +437,16 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         payroll.status = 'DRAFT'
         payroll.save()
         
-        # Dispatch calculation asynchronously
-        task_generate_monthly_payroll.delay(str(startup.id), int(payroll.month), int(payroll.year))
+        # Recalculate payroll immediately
+        try:
+            payroll, count = PayrollGenerationService.generate_monthly_payroll(startup, int(payroll.month), int(payroll.year))
+        except Exception as e:
+            task_generate_monthly_payroll.delay(str(startup.id), int(payroll.month), int(payroll.year))
         
+        payroll.refresh_from_db()
         return Response(
             {
-                "message": "Payroll recalculation and compilation dispatched successfully.",
+                "message": "Payroll recalculation completed successfully.",
                 "payroll": PayrollSerializer(payroll).data
             },
             status=status.HTTP_200_OK
@@ -601,16 +621,27 @@ class PayslipViewSet(viewsets.ModelViewSet):
                 file_content = f.read()
         except Exception:
             try:
-                with open(payslip.pdf_file.path, "rb") as f:
-                    file_content = f.read()
+                file_url = payslip.pdf_file.url if hasattr(payslip.pdf_file, "url") else str(payslip.pdf_file)
+                if file_url.startswith("http://") or file_url.startswith("https://"):
+                    import httpx
+                    resp = httpx.get(file_url, timeout=15.0)
+                    if resp.status_code == 200:
+                        file_content = resp.content
+                    else:
+                        raise Exception(f"HTTP {resp.status_code} fetching remote file")
+                else:
+                    with open(payslip.pdf_file.path, "rb") as f:
+                        file_content = f.read()
             except Exception as e:
                 return Response(
                     {"error": f"Failed to read payslip file: {str(e)}"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
-        file_basename = f"payslip_{payslip.employee.first_name}_{payslip.payroll.month}_{payslip.payroll.year}"
-        if payslip.pdf_file.name.endswith(".pdf"):
+        first_name = getattr(payslip.employee, "first_name", "employee") or "employee"
+        file_basename = f"payslip_{first_name}_{payslip.payroll.month}_{payslip.payroll.year}"
+        file_str = str(payslip.pdf_file.name or payslip.pdf_file)
+        if file_str.lower().endswith(".pdf") or ".pdf" in file_str.lower():
             content_type = "application/pdf"
             filename = f"{file_basename}.pdf"
         else:
@@ -802,6 +833,9 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             "automation_enabled": settings.automation_enabled,
             "statutory_pf_percentage": float(settings.pf_percentage),
             "statutory_esi_percentage": float(settings.esi_percentage),
+            "tax_percentage": float(settings.tax_percentage),
+            "statutory_tax_percentage": float(settings.tax_percentage),
+            "enable_leave_deductions": settings.enable_leave_deductions,
             "compliance_status": "COMPLIANT",
             "finance_approval_required": settings.finance_approval_required,
             "finance_manager": str(settings.finance_manager.id) if settings.finance_manager else None,
@@ -831,6 +865,8 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
         automation_enabled = request.data.get("automation_enabled")
         pf_percentage = request.data.get("statutory_pf_percentage") or request.data.get("pf_percentage")
         esi_percentage = request.data.get("statutory_esi_percentage") or request.data.get("esi_percentage")
+        tax_percentage = request.data.get("statutory_tax_percentage") or request.data.get("tax_percentage")
+        enable_leave_deductions = request.data.get("enable_leave_deductions")
         
         finance_approval_required = request.data.get("finance_approval_required")
         finance_manager_id = request.data.get("finance_manager")
@@ -843,8 +879,21 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             settings.automation_enabled = bool(automation_enabled)
         if pf_percentage is not None:
             settings.pf_percentage = Decimal(str(pf_percentage))
+            SalaryStructure.objects.filter(
+                Q(employee__startup=startup) | Q(employee__organization__startup=startup)
+            ).update(pf_percentage=settings.pf_percentage)
         if esi_percentage is not None:
             settings.esi_percentage = Decimal(str(esi_percentage))
+            SalaryStructure.objects.filter(
+                Q(employee__startup=startup) | Q(employee__organization__startup=startup)
+            ).update(esi_percentage=settings.esi_percentage)
+        if tax_percentage is not None:
+            settings.tax_percentage = Decimal(str(tax_percentage))
+            SalaryStructure.objects.filter(
+                Q(employee__startup=startup) | Q(employee__organization__startup=startup)
+            ).update(tax_percentage=settings.tax_percentage)
+        if enable_leave_deductions is not None:
+            settings.enable_leave_deductions = bool(enable_leave_deductions)
             
         if finance_approval_required is not None:
             settings.finance_approval_required = bool(finance_approval_required)
@@ -877,6 +926,9 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             "automation_enabled": settings.automation_enabled,
             "statutory_pf_percentage": float(settings.pf_percentage),
             "statutory_esi_percentage": float(settings.esi_percentage),
+            "tax_percentage": float(settings.tax_percentage),
+            "statutory_tax_percentage": float(settings.tax_percentage),
+            "enable_leave_deductions": settings.enable_leave_deductions,
             "compliance_status": "COMPLIANT",
             "finance_approval_required": settings.finance_approval_required,
             "finance_manager": str(settings.finance_manager.id) if settings.finance_manager else None,
@@ -885,6 +937,12 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             "director": str(settings.director.id) if settings.director else None,
             "director_name": f"{settings.director.employee_profile.first_name} {settings.director.employee_profile.last_name}" if settings.director and getattr(settings.director, 'employee_profile', None) else (settings.director.username if settings.director else None),
         })
+
+    def update(self, request, pk=None):
+        return self.create(request)
+
+    def partial_update(self, request, pk=None):
+        return self.create(request)
 
 
 class DocumentTemplateViewSet(StartupTenantMixin, viewsets.ModelViewSet):

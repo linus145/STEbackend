@@ -140,13 +140,18 @@ class PayrollCalculationService:
         deductions_adj_amt = adjustments.filter(type='DEDUCTION').aggregate(Sum('amount'))['amount__sum'] or Decimal('0.00')
 
         # Absent and unpaid leave deductions
-        # Deduct basic salary per-day
-        daily_rate = basic / Decimal(attendance_summary['total_days_in_month'])
-        leave_deduction = (
-            (attendance_summary['absent_days'] * daily_rate) +
-            (attendance_summary['unpaid_leave_days'] * daily_rate) +
-            (attendance_summary['half_days'] * daily_rate * Decimal('0.5'))
-        ).quantize(Decimal('0.01'))
+        startup = getattr(payroll_cycle, 'startup', None) or getattr(employee, 'startup', None)
+        setting = getattr(startup, 'payroll_setting', None)
+        global_leave_deductions = getattr(setting, 'enable_leave_deductions', True) if setting else True
+
+        leave_deduction = Decimal('0.00')
+        if global_leave_deductions:
+            daily_rate = basic / Decimal(attendance_summary['total_days_in_month'])
+            leave_deduction = (
+                (attendance_summary['absent_days'] * daily_rate) +
+                (attendance_summary['unpaid_leave_days'] * daily_rate) +
+                (attendance_summary['half_days'] * daily_rate * Decimal('0.5'))
+            ).quantize(Decimal('0.01'))
 
         # Tax calculations
         taxable_earnings = basic + hra + allowances_sum + overtime_pay + bonus_amt - leave_deduction

@@ -61,6 +61,7 @@ class SalaryStructure(SoftDeleteModel):
         choices=[('ACTIVE', 'Active'), ('INACTIVE', 'Inactive')], 
         default='ACTIVE'
     )
+    deduct_absent_leaves = models.BooleanField(default=True, help_text="Calculate and deduct absent/unpaid leave penalty from monthly pay")
     
     # Many-to-Many with through models to store fixed amounts per employee
     allowances = models.ManyToManyField(Allowance, through='EmployeeAllowance')
@@ -207,7 +208,7 @@ class Payslip(SoftDeleteModel):
     total_deductions = models.DecimalField(max_digits=15, decimal_places=2)
     net_salary = models.DecimalField(max_digits=15, decimal_places=2)
     
-    pdf_file = models.FileField(upload_to='payslips/', null=True, blank=True)
+    pdf_file = models.FileField(upload_to='payslips/', max_length=500, null=True, blank=True)
     is_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     generated_at = models.DateTimeField(default=timezone.now)
@@ -242,7 +243,7 @@ class Reimbursement(SoftDeleteModel):
     amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='OTHER')
     description = models.TextField(blank=True)
-    proof = models.FileField(upload_to='reimbursement_proofs/', null=True, blank=True)
+    proof = models.FileField(upload_to='reimbursement_proofs/', max_length=500, null=True, blank=True)
     approval_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -315,6 +316,8 @@ class PayrollSetting(SoftDeleteModel):
     automation_enabled = models.BooleanField(default=True)
     pf_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=12.00)
     esi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=1.75)
+    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=10.00)
+    enable_leave_deductions = models.BooleanField(default=True, help_text="Enable automatic absence and unpaid leave penalty deductions globally")
     
     finance_approval_required = models.BooleanField(default=False)
     finance_manager = models.ForeignKey(

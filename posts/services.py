@@ -37,7 +37,9 @@ class PostService:
         qs = Post.objects.select_related(
             "author", 
             "author__founder_profile", 
-            "author__investor_profile"
+            "author__investor_profile",
+            "company_page",
+            "company_page__company",
         ).annotate(
             likes_count=Coalesce(
                 Subquery(likes_subquery, output_field=IntegerField()), 0

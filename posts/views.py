@@ -98,7 +98,12 @@ class PostDetailView(APIView):
             return Response(
                 {"detail": "Post not found."}, status=status.HTTP_404_NOT_FOUND
             )
-        if post.author != request.user:
+        is_company_owner = (
+            post.company_page and
+            post.company_page.company and
+            post.company_page.company.owner_id == request.user.id
+        )
+        if post.author != request.user and not is_company_owner:
             return Response(
                 {"detail": "Not authorized."}, status=status.HTTP_403_FORBIDDEN
             )
@@ -109,7 +114,8 @@ class PostDetailView(APIView):
 
 class UserPostListView(generics.ListAPIView):
     """
-    Returns a paginated list of posts specifically created by a user.
+    Returns a paginated list of personal posts created by an individual user.
+    Excludes company page updates so company posts only appear on company pages.
     """
 
     permission_classes = (AllowAny,)
@@ -120,5 +126,6 @@ class UserPostListView(generics.ListAPIView):
         user_id = self.kwargs.get("user_id")
         current_user = self.request.user if self.request.user.is_authenticated else None
         return PostService.get_annotated_posts(current_user=current_user).filter(
-            author_id=user_id
+            author_id=user_id,
+            company_page__isnull=True,
         )

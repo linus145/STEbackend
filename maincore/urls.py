@@ -266,6 +266,7 @@ urlpatterns = [
     path("api/public/", include("publicpages.urls")),
     path("api/analytics/", include("analytics.urls")),
     path("api/following/", include("following.urls")),
+    path("api/comppages/", include("comppages.urls")),
 
     
     #AI

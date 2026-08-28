@@ -102,8 +102,9 @@ INSTALLED_APPS = [
     "analytics",
     "creditsystem",
     "following",
+    "comppages",
 
-    
+
     #AI
     "AI",
     "AIInterview", 
@@ -238,10 +239,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
-# Enable WhiteNoise for static files
+# Default storage backend (ImageKit CDN for images & PDFs)
 STORAGES = {
     "default": {
-        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "BACKEND": "maincore.imagekit_storage.ImageKitStorage",
     },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
@@ -386,9 +387,20 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # ImageKit configuration
+# Set 1: Images & General Assets
 IMAGEKIT_PUBLIC_KEY = os.environ.get("IMAGEKIT_PUBLIC_KEY", "")
 IMAGEKIT_PRIVATE_KEY = os.environ.get("IMAGEKIT_PRIVATE_KEY", "")
 IMAGEKIT_URL_ENDPOINT = os.environ.get("IMAGEKIT_URL_ENDPOINT", "")
+
+# Set 2: PDFs, Payslips & Document Media
+IMAGEKIT_PUBLIC_KEY2 = os.environ.get("IMAGEKIT_PUBLIC_KEY2", "")
+IMAGEKIT_PRIVATE_KEY2 = os.environ.get("IMAGEKIT_PRIVATE_KEY2", "")
+IMAGEKIT_URL_ENDPOINT2 = os.environ.get("IMAGEKIT_URL_ENDPOINT2", "")
+
+# Set 3: Company Page Images & Media
+IMAGEKIT_PUBLIC_KEY3 = os.environ.get("IMAGEKIT_PUBLIC_KEY3", "")
+IMAGEKIT_PRIVATE_KEY3 = os.environ.get("IMAGEKIT_PRIVATE_KEY3", "")
+IMAGEKIT_URL_ENDPOINT3 = os.environ.get("IMAGEKIT_URL_ENDPOINT3", "")
 
 # Google OAuth
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
