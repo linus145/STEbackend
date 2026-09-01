@@ -121,9 +121,10 @@ def task_email_payslip(payslip_id):
         payslip = Payslip.objects.get(id=payslip_id)
         employee = payslip.employee
         
-        # Force generate/regenerate payslip to ensure layout changes are included
-        PayslipGenerationService.async_generate_payslip_pdf(payslip)
-        payslip.refresh_from_db()
+        # Ensure PDF is available (use already generated PDF if present, otherwise generate on-demand)
+        if not payslip.pdf_file:
+            PayslipGenerationService.async_generate_payslip_pdf(payslip)
+            payslip.refresh_from_db()
             
         recipient_email = employee.email
         if not recipient_email:

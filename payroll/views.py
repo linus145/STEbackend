@@ -117,8 +117,13 @@ class DeductionViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     search_fields = ["name"]
 
 
+from decimal import Decimal
+from maincore.pagination import StandardResultsSetPagination
+
+
 class SalaryStructureViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     permission_classes = (IsAuthenticated, HasHRToolkitPermission)
+    pagination_class = StandardResultsSetPagination
     queryset = (
         SalaryStructure.objects.select_related("employee")
         .prefetch_related("employeeallowance_set", "employeededuction_set")
@@ -127,7 +132,7 @@ class SalaryStructureViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     serializer_class = SalaryStructureSerializer
 
     def get_queryset(self):
-        return super().get_queryset().select_related("employee").prefetch_related("employeeallowance_set", "employeededuction_set")
+        return super().get_queryset().select_related("employee").prefetch_related("employeeallowance_set", "employeededuction_set").order_by("employee__first_name", "employee__last_name")
 
     def create(self, request, *args, **kwargs):
         from payroll.serializers import resolve_employee_id_in_data
@@ -152,6 +157,121 @@ class SalaryStructureViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         instance = self.get_object()
         instance.hard_delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @decorators.action(detail=False, methods=["post"], url_path="bulk-import")
+    def bulk_import(self, request):
+        """
+        POST /api/payroll/structures/bulk-import/
+        Imports or updates a batch of salary structures for employees.
+        Matches employee by employee_id, email, or id.
+        """
+        from employees.models import Employee
+        structures_data = request.data.get("structures", [])
+        if not isinstance(structures_data, list) or len(structures_data) == 0:
+            return Response({"error": "No salary structure records provided."}, status=status.HTTP_400_BAD_REQUEST)
+
+        tenant_employees = Employee.objects.filter(self.get_tenant_filter(), is_deleted=False)
+        emp_by_id = {str(e.employee_id).strip().lower(): e for e in tenant_employees if e.employee_id}
+        emp_by_email = {str(e.email).strip().lower(): e for e in tenant_employees if e.email}
+        emp_by_uuid = {str(e.id): e for e in tenant_employees}
+
+        created_count = 0
+        updated_count = 0
+        skipped_count = 0
+        errors = []
+
+        for idx, row in enumerate(structures_data):
+            row_num = idx + 1
+            try:
+                emp_id_val = str(row.get("employee_id") or "").strip().lower()
+                emp_email_val = str(row.get("email") or row.get("work_email") or "").strip().lower()
+                emp_direct_val = str(row.get("employee") or "").strip().lower()
+
+                employee_obj = (
+                    emp_by_id.get(emp_id_val)
+                    or emp_by_email.get(emp_email_val)
+                    or emp_by_id.get(emp_direct_val)
+                    or emp_by_email.get(emp_direct_val)
+                    or emp_by_uuid.get(emp_direct_val)
+                    or emp_by_uuid.get(emp_id_val)
+                )
+
+                if not employee_obj:
+                    identifier = emp_id_val or emp_email_val or emp_direct_val or f"Row {row_num}"
+                    errors.append(f"Row {row_num}: Employee '{identifier}' not found in active directory.")
+                    skipped_count += 1
+                    continue
+
+                try:
+                    basic_salary = Decimal(str(row.get("basic_salary") or row.get("basic") or 0).replace(",", "").strip())
+                except Exception:
+                    basic_salary = Decimal("0.00")
+
+                try:
+                    hra = Decimal(str(row.get("hra") or 0).replace(",", "").strip())
+                except Exception:
+                    hra = Decimal("0.00")
+
+                try:
+                    overtime_rate = Decimal(str(row.get("overtime_rate") or row.get("ot_rate") or 0).replace(",", "").strip())
+                except Exception:
+                    overtime_rate = Decimal("0.00")
+
+                try:
+                    tax_percentage = Decimal(str(row.get("tax_percentage") or row.get("tax") or 10).replace(",", "").strip())
+                except Exception:
+                    tax_percentage = Decimal("10.00")
+
+                try:
+                    pf_percentage = Decimal(str(row.get("pf_percentage") or row.get("pf") or 12).replace(",", "").strip())
+                except Exception:
+                    pf_percentage = Decimal("12.00")
+
+                try:
+                    esi_percentage = Decimal(str(row.get("esi_percentage") or row.get("esi") or 1.75).replace(",", "").strip())
+                except Exception:
+                    esi_percentage = Decimal("1.75")
+
+                status_val = str(row.get("status") or "ACTIVE").strip().upper()
+                if status_val not in ["ACTIVE", "INACTIVE"]:
+                    status_val = "ACTIVE"
+
+                obj, created = SalaryStructure.objects.update_or_create(
+                    employee=employee_obj,
+                    defaults={
+                        "basic_salary": basic_salary,
+                        "hra": hra,
+                        "overtime_rate": overtime_rate,
+                        "tax_percentage": tax_percentage,
+                        "pf_percentage": pf_percentage,
+                        "esi_percentage": esi_percentage,
+                        "status": status_val,
+                        "is_deleted": False,
+                        "deleted_at": None,
+                    }
+                )
+
+                if created:
+                    created_count += 1
+                else:
+                    updated_count += 1
+
+            except Exception as row_err:
+                errors.append(f"Row {row_num}: {str(row_err)}")
+                skipped_count += 1
+
+        return Response(
+            {
+                "status": "SUCCESS",
+                "created_count": created_count,
+                "updated_count": updated_count,
+                "total_processed": created_count + updated_count,
+                "skipped_count": skipped_count,
+                "errors": errors,
+                "message": f"Successfully processed {created_count + updated_count} salary structures.",
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @decorators.action(detail=False, methods=["post"])
     def assign_allowance(self, request):
@@ -452,6 +572,25 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
+    @decorators.action(detail=True, methods=["get"])
+    def progress(self, request, pk=None):
+        """
+        Returns real-time payslip generation progress for this payroll run.
+        """
+        payroll = self.get_object()
+        total_records = payroll.records.count()
+        total_payslips = payroll.payslips.count()
+        generated_payslips = payroll.payslips.exclude(pdf_file='').exclude(pdf_file__isnull=True).count()
+        target_total = total_payslips if total_payslips > 0 else (total_records or 1)
+
+        return Response({
+            "payroll_id": str(payroll.id),
+            "status": payroll.status,
+            "total_count": target_total,
+            "generated_count": generated_payslips,
+            "is_complete": payroll.status == 'APPROVED' and (generated_payslips >= target_total if target_total > 0 else True)
+        })
+
     def destroy(self, request, *args, **kwargs):
         """
         Permanently hard-deletes the payroll run and all of its associated records.
@@ -600,15 +739,16 @@ class PayslipViewSet(viewsets.ModelViewSet):
             from django.http import Http404
             raise Http404("No Payslip matches the given query.")
 
-        # Force regenerate payslip PDF synchronously on download to ensure updates are reflected
-        try:
-            PayslipGenerationService.async_generate_payslip_pdf(payslip)
-            payslip.refresh_from_db()
-        except Exception as e:
-            import logging
-            logging.getLogger("payroll.views").warning(
-                f"Synchronous PDF generation failed: {e}."
-            )
+        # Generate payslip PDF on-demand only if not already generated
+        if not payslip.pdf_file:
+            try:
+                PayslipGenerationService.async_generate_payslip_pdf(payslip)
+                payslip.refresh_from_db()
+            except Exception as e:
+                import logging
+                logging.getLogger("payroll.views").warning(
+                    f"On-demand PDF generation failed: {e}."
+                )
 
         if not payslip.pdf_file:
             return Response(
@@ -835,6 +975,8 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             "statutory_esi_percentage": float(settings.esi_percentage),
             "tax_percentage": float(settings.tax_percentage),
             "statutory_tax_percentage": float(settings.tax_percentage),
+            "enable_tax_deductions": settings.enable_tax_deductions,
+            "enable_statutory_deductions": settings.enable_statutory_deductions,
             "enable_leave_deductions": settings.enable_leave_deductions,
             "compliance_status": "COMPLIANT",
             "finance_approval_required": settings.finance_approval_required,
@@ -866,6 +1008,8 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
         pf_percentage = request.data.get("statutory_pf_percentage") or request.data.get("pf_percentage")
         esi_percentage = request.data.get("statutory_esi_percentage") or request.data.get("esi_percentage")
         tax_percentage = request.data.get("statutory_tax_percentage") or request.data.get("tax_percentage")
+        enable_tax_deductions = request.data.get("enable_tax_deductions")
+        enable_statutory_deductions = request.data.get("enable_statutory_deductions")
         enable_leave_deductions = request.data.get("enable_leave_deductions")
         
         finance_approval_required = request.data.get("finance_approval_required")
@@ -873,10 +1017,21 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
         director_approval_required = request.data.get("director_approval_required")
         director_id = request.data.get("director")
         
+        def parse_bool(val, default=True):
+            if val is None:
+                return default
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, str):
+                return val.strip().lower() not in ['false', '0', 'off', 'no', 'null', 'undefined', '']
+            if isinstance(val, (int, float)):
+                return val != 0
+            return bool(val)
+
         if currency is not None:
             settings.currency = currency
         if automation_enabled is not None:
-            settings.automation_enabled = bool(automation_enabled)
+            settings.automation_enabled = parse_bool(automation_enabled, True)
         if pf_percentage is not None:
             settings.pf_percentage = Decimal(str(pf_percentage))
             SalaryStructure.objects.filter(
@@ -892,11 +1047,15 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             SalaryStructure.objects.filter(
                 Q(employee__startup=startup) | Q(employee__organization__startup=startup)
             ).update(tax_percentage=settings.tax_percentage)
+        if enable_tax_deductions is not None:
+            settings.enable_tax_deductions = parse_bool(enable_tax_deductions, True)
+        if enable_statutory_deductions is not None:
+            settings.enable_statutory_deductions = parse_bool(enable_statutory_deductions, True)
         if enable_leave_deductions is not None:
-            settings.enable_leave_deductions = bool(enable_leave_deductions)
+            settings.enable_leave_deductions = parse_bool(enable_leave_deductions, True)
             
         if finance_approval_required is not None:
-            settings.finance_approval_required = bool(finance_approval_required)
+            settings.finance_approval_required = parse_bool(finance_approval_required, False)
         if finance_manager_id is not None:
             if finance_manager_id == "":
                 settings.finance_manager = None
@@ -904,11 +1063,11 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
                 from django.contrib.auth import get_user_model
                 User = get_user_model()
                 settings.finance_manager = User.objects.filter(id=finance_manager_id).first()
-        elif finance_approval_required is False:
+        elif settings.finance_approval_required is False:
             settings.finance_manager = None
 
         if director_approval_required is not None:
-            settings.director_approval_required = bool(director_approval_required)
+            settings.director_approval_required = parse_bool(director_approval_required, False)
         if director_id is not None:
             if director_id == "":
                 settings.director = None
@@ -916,10 +1075,18 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
                 from django.contrib.auth import get_user_model
                 User = get_user_model()
                 settings.director = User.objects.filter(id=director_id).first()
-        elif director_approval_required is False:
+        elif settings.director_approval_required is False:
             settings.director = None
             
         settings.save()
+
+        # Auto-recalculate active draft payroll runs for this startup to immediately reflect new settings
+        for p in Payroll.objects.filter(startup=startup, status='DRAFT'):
+            try:
+                PayrollGenerationService.generate_monthly_payroll(startup, int(p.month), int(p.year))
+            except Exception:
+                pass
+
         return Response({
             "id": str(settings.id),
             "currency": settings.currency,
@@ -928,6 +1095,8 @@ class PayrollSettingsViewSet(viewsets.ViewSet):
             "statutory_esi_percentage": float(settings.esi_percentage),
             "tax_percentage": float(settings.tax_percentage),
             "statutory_tax_percentage": float(settings.tax_percentage),
+            "enable_tax_deductions": settings.enable_tax_deductions,
+            "enable_statutory_deductions": settings.enable_statutory_deductions,
             "enable_leave_deductions": settings.enable_leave_deductions,
             "compliance_status": "COMPLIANT",
             "finance_approval_required": settings.finance_approval_required,

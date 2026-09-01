@@ -141,7 +141,11 @@ class PayrollCalculationService:
 
         # Absent and unpaid leave deductions
         startup = getattr(payroll_cycle, 'startup', None) or getattr(employee, 'startup', None)
-        setting = getattr(startup, 'payroll_setting', None)
+        if not startup and hasattr(employee, 'organization') and employee.organization:
+            startup = getattr(employee.organization, 'startup', None)
+
+        from payroll.models import PayrollSetting
+        setting = PayrollSetting.objects.filter(startup=startup).first() if startup else None
         global_leave_deductions = getattr(setting, 'enable_leave_deductions', True) if setting else True
 
         leave_deduction = Decimal('0.00')
@@ -153,13 +157,22 @@ class PayrollCalculationService:
                 (attendance_summary['half_days'] * daily_rate * Decimal('0.5'))
             ).quantize(Decimal('0.01'))
 
-        # Tax calculations
-        taxable_earnings = basic + hra + allowances_sum + overtime_pay + bonus_amt - leave_deduction
-        tax_amount = TaxCalculationService.calculate_tax(employee, max(taxable_earnings, Decimal('0.00')))
+        # Tax calculations (Respects global enable_tax_deductions setting)
+        global_tax_deductions = getattr(setting, 'enable_tax_deductions', True) if setting else True
+        if global_tax_deductions:
+            taxable_earnings = basic + hra + allowances_sum + overtime_pay + bonus_amt - leave_deduction
+            tax_amount = TaxCalculationService.calculate_tax(employee, max(taxable_earnings, Decimal('0.00')))
+        else:
+            tax_amount = Decimal('0.00')
 
-        # PF and ESI contributions
-        pf_amount = (basic * (structure.pf_percentage / Decimal('100.00'))).quantize(Decimal('0.01'))
-        esi_amount = (basic * (structure.esi_percentage / Decimal('100.00'))).quantize(Decimal('0.01'))
+        # PF and ESI contributions (Respects global enable_statutory_deductions setting)
+        global_statutory_deductions = getattr(setting, 'enable_statutory_deductions', True) if setting else True
+        if global_statutory_deductions:
+            pf_amount = (basic * (structure.pf_percentage / Decimal('100.00'))).quantize(Decimal('0.01'))
+            esi_amount = (basic * (structure.esi_percentage / Decimal('100.00'))).quantize(Decimal('0.01'))
+        else:
+            pf_amount = Decimal('0.00')
+            esi_amount = Decimal('0.00')
 
         # Summarize
         gross_salary = basic + hra + allowances_sum + bonus_amt + overtime_pay + reimbursement_amt
@@ -292,12 +305,9 @@ class PayrollApprovalService:
         # Update all records to Approved
         payroll.records.all().update(status='APPROVED')
 
-        # Publish all associated payslips and trigger PDFs
-        payslips = payroll.payslips.all()
-        payslips.update(is_published=True)
-
-        for ps in payslips:
-            PayslipGenerationService.async_generate_payslip_pdf(ps)
+        # Publish all associated payslips and trigger PDFs in parallel
+        payslips = list(payroll.payslips.all())
+        payroll.payslips.all().update(is_published=True)
 
         # Mark paid reimbursements
         from organization.models import Organization
@@ -312,6 +322,9 @@ class PayrollApprovalService:
             created_at__year=payroll.year,
             created_at__month=payroll.month
         ).update(approval_status='PAID')
+
+        payslip_ids = [str(ps.id) for ps in payslips]
+        PayslipGenerationService.batch_generate_payslips_parallel(payslip_ids)
 
         return True
 
@@ -796,4 +809,31 @@ This is a system-generated payslip. No signature required.
                 payslip.save()
             except Exception as ex:
                 print(f"Error generating fallback payslip file: {ex}")
+
+    @classmethod
+    def generate_single_payslip_by_id(cls, payslip_id):
+        from django.db import connection
+        try:
+            from payroll.models import Payslip
+            ps = Payslip.objects.filter(id=payslip_id).select_related(
+                'employee', 'payroll', 'payroll_record', 'employee__startup'
+            ).first()
+            if ps:
+                cls.async_generate_payslip_pdf(ps)
+        except Exception as e:
+            import logging
+            logging.getLogger("payroll.services").error(f"Error generating PDF for payslip {payslip_id}: {e}")
+        finally:
+            connection.close()
+
+    @classmethod
+    def batch_generate_payslips_parallel(cls, payslip_ids, max_workers=10):
+        from concurrent.futures import ThreadPoolExecutor
+        if not payslip_ids:
+            return
+
+        workers = min(len(payslip_ids), max_workers)
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            list(executor.map(cls.generate_single_payslip_by_id, payslip_ids))
+
 

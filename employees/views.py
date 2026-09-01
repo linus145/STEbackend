@@ -22,7 +22,7 @@ from rest_framework.decorators import action
 
 class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     queryset = Employee.objects.select_related(
-        "department", "designation", "user", "profile_details"
+        "department", "designation", "user", "profile_details", "salary_structure"
     ).all()
     serializer_class = EmployeeSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -118,6 +118,122 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(
             serializer.data, status=status.HTTP_201_CREATED, headers=headers
+        )
+
+    @action(detail=False, methods=["post"], url_path="bulk-import")
+    def bulk_import(self, request):
+        """
+        POST /api/employees/employees/bulk-import/
+        Dispatches Celery background worker for fast batch employee import.
+        """
+        from organization.models import Organization
+        from startups.models import Startup
+        from employees.tasks import task_bulk_import_employees
+
+        user = request.user
+
+        # 1. Resolve Organization & Startup
+        company = getattr(user, "company_profile", None)
+        organization = None
+        if company:
+            organization = Organization.objects.filter(company=company).first()
+            if not organization:
+                organization = Organization.objects.create(company=company, name=company.company_name)
+
+        if organization:
+            if not organization.startup:
+                st = Startup.objects.filter(founder=user, name=company.company_name).first()
+                if not st:
+                    st = Startup.objects.filter(founder=user).first()
+                if not st:
+                    st = Startup.objects.first()
+                if not st:
+                    st = Startup.objects.create(
+                        founder=user,
+                        name=company.company_name,
+                        pitch=company.description or f"Startup profile for {company.company_name}",
+                        industry=company.industry or "Technology",
+                        stage="Bootstrap",
+                        website_url=company.website,
+                        logo_url=company.logo_url,
+                    )
+                organization.startup = st
+                organization.save()
+            startup = organization.startup
+        else:
+            startup = user.startups.first()
+
+        employees_data = request.data.get("employees", [])
+        if not isinstance(employees_data, list) or len(employees_data) == 0:
+            return Response({"error": "No employee records provided for import."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Enqueue async Celery task
+        try:
+            task = task_bulk_import_employees.delay(
+                str(organization.id) if organization else None,
+                str(startup.id) if startup else None,
+                employees_data
+            )
+            return Response(
+                {
+                    "status": "QUEUED",
+                    "task_id": str(task.id),
+                    "total_records": len(employees_data),
+                    "message": f"Importing {len(employees_data)} employees in background...",
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
+        except Exception as e:
+            # Fallback to direct synchronous execution if Celery broker unreachable
+            res = task_bulk_import_employees(
+                str(organization.id) if organization else None,
+                str(startup.id) if startup else None,
+                employees_data
+            )
+            return Response(res, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path=r"import-status/(?P<task_id>[^/.]+)")
+    def import_status(self, request, task_id=None):
+        """
+        GET /api/employees/employees/import-status/<task_id>/
+        Polls the status of an active Celery import task.
+        """
+        from celery.result import AsyncResult
+
+        if not task_id:
+            return Response({"error": "Task ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        res = AsyncResult(task_id)
+        if res.state == "PENDING":
+            return Response({"status": "PENDING", "percent": 0, "message": "Task queued in worker..."}, status=status.HTTP_200_OK)
+        elif res.state == "PROGRESS":
+            info = res.info or {}
+            return Response(
+                {
+                    "status": "PROGRESS",
+                    "percent": info.get("percent", 50),
+                    "current": info.get("current", 0),
+                    "total": info.get("total", 0),
+                    "created_count": info.get("created_count", 0),
+                    "skipped_count": info.get("skipped_count", 0),
+                },
+                status=status.HTTP_200_OK,
+            )
+        elif res.state == "SUCCESS":
+            return Response({"status": "SUCCESS", "percent": 100, **res.result}, status=status.HTTP_200_OK)
+        elif res.state == "FAILURE":
+            return Response({"status": "FAILURE", "error": str(res.result)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
+            return Response({"status": str(res.state), "info": str(res.info)}, status=status.HTTP_200_OK)
+
+        return Response(
+            {
+                "created_count": created_count,
+                "skipped_count": skipped_count,
+                "errors": errors,
+                "message": f"Successfully imported {created_count} employee records.",
+            },
+            status=status.HTTP_201_CREATED,
         )
 
     @action(detail=False, methods=["get"], url_path="me", permission_classes=[permissions.IsAuthenticated])

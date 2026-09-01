@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from leave_management.models import LeaveType, LeaveRequest, LeaveBalance
+from employees.models import Employee
 from employees.serializers import EmployeeSerializer
 
 
@@ -44,16 +45,26 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
         return 0
 
 
+class LeaveBalanceEmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = ["id", "first_name", "last_name", "email", "employee_id"]
+
+
 class LeaveBalanceSerializer(serializers.ModelSerializer):
     leave_type_name = serializers.CharField(source="leave_type.name", read_only=True)
+    leave_type_detail = LeaveTypeSerializer(source="leave_type", read_only=True)
+    employee_detail = LeaveBalanceEmployeeSerializer(source="employee", read_only=True)
 
     class Meta:
         model = LeaveBalance
         fields = [
             "id",
             "employee",
+            "employee_detail",
             "leave_type",
             "leave_type_name",
+            "leave_type_detail",
             "year",
             "total_days",
             "used_days",

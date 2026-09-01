@@ -69,6 +69,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     pan_detail = EmployeePANDetailSerializer(required=False, allow_null=True)
     joining_detail = EmployeeJoiningDetailSerializer(required=False, allow_null=True)
     bank_detail = EmployeeBankDetailSerializer(required=False, allow_null=True)
+    salary_structure_detail = serializers.SerializerMethodField()
     
     password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     
@@ -80,13 +81,33 @@ class EmployeeSerializer(serializers.ModelSerializer):
             'department', 'department_detail', 'joining_date', 
             'employment_type', 'reporting_manager', 'reporting_manager_detail', 'subordinates_count', 'salary', 'avatar', 
             'address', 'status', 'role', 'profile_details', 'job_application', 
-            'aadhaar_detail', 'pan_detail', 'joining_detail', 'bank_detail',
+            'aadhaar_detail', 'pan_detail', 'joining_detail', 'bank_detail', 'salary_structure_detail',
             'created_at', 'updated_at', 'portal_username', 'portal_password', 'password'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
         extra_kwargs = {
             'employee_id': {'required': False, 'allow_blank': True}
         }
+
+    def get_salary_structure_detail(self, obj):
+        try:
+            struct = getattr(obj, 'salary_structure', None)
+            if struct and not struct.is_deleted:
+                basic = float(struct.basic_salary or 0)
+                hra = float(struct.hra or 0)
+                return {
+                    'id': str(struct.id),
+                    'basic_salary': basic,
+                    'hra': hra,
+                    'gross_salary': basic + hra,
+                    'tax_percentage': float(struct.tax_percentage or 0),
+                    'pf_percentage': float(struct.pf_percentage or 0),
+                    'esi_percentage': float(struct.esi_percentage or 0),
+                    'status': struct.status,
+                }
+        except Exception:
+            pass
+        return None
 
     def get_subordinates_count(self, obj):
         return obj.subordinates.filter(is_deleted=False, status='ACTIVE').count()

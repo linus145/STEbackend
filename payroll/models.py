@@ -144,6 +144,20 @@ class Payroll(SoftDeleteModel):
     def __str__(self):
         return f"Payroll {self.month}/{self.year} - {self.startup.name}"
 
+    def delete(self, using=None, keep_parents=False):
+        for ps in self.payslips.all():
+            ps.delete(using=using, keep_parents=keep_parents)
+        for rec in self.records.all():
+            rec.delete(using=using, keep_parents=keep_parents)
+        super().delete(using=using, keep_parents=keep_parents)
+
+    def hard_delete(self, using=None, keep_parents=False):
+        for ps in self.payslips.all():
+            ps.hard_delete(using=using, keep_parents=keep_parents)
+        for rec in self.records.all():
+            rec.hard_delete(using=using, keep_parents=keep_parents)
+        super().hard_delete(using=using, keep_parents=keep_parents)
+
 class PayrollRecord(SoftDeleteModel):
     """
     Individual calculation record for an employee for a specific payroll cycle.
@@ -215,6 +229,22 @@ class Payslip(SoftDeleteModel):
 
     def __str__(self):
         return f"Payslip for {self.employee} - {self.payroll}"
+
+    def delete(self, using=None, keep_parents=False):
+        if self.pdf_file:
+            try:
+                self.pdf_file.delete(save=False)
+            except Exception:
+                pass
+        super().delete(using=using, keep_parents=keep_parents)
+
+    def hard_delete(self, using=None, keep_parents=False):
+        if self.pdf_file:
+            try:
+                self.pdf_file.delete(save=False)
+            except Exception:
+                pass
+        super().hard_delete(using=using, keep_parents=keep_parents)
 
 class Reimbursement(SoftDeleteModel):
     """
@@ -317,6 +347,8 @@ class PayrollSetting(SoftDeleteModel):
     pf_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=12.00)
     esi_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=1.75)
     tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=10.00)
+    enable_tax_deductions = models.BooleanField(default=True, help_text="Enable automatic tax deductions in payroll calculations")
+    enable_statutory_deductions = models.BooleanField(default=True, help_text="Enable statutory PF and ESI deductions in payroll calculations")
     enable_leave_deductions = models.BooleanField(default=True, help_text="Enable automatic absence and unpaid leave penalty deductions globally")
     
     finance_approval_required = models.BooleanField(default=False)
