@@ -70,3 +70,4 @@ class HasAIInterviewPermission(BasePermission):
         if request.user.is_superuser:
             return True
         return check_subscription_feature(request.user, "has_ai_interview_pipeline")
+        return check_subscription_feature(request.user, "has_ai_interview_pipeline")

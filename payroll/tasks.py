@@ -35,9 +35,30 @@ def task_approve_payroll_cycle(payroll_id, approver_user_id):
     Celery task to lock salary values, finalize reimbursements, publish payslips, and dispatch PDFs.
     """
     try:
+        from payroll.models import Payroll
+        from payroll.services import PayslipGenerationService
+
+        # 1. Execute DB approval and status transitions atomically
         success = PayrollApprovalService.approve_payroll_cycle(payroll_id, approver_user_id)
         logger.info(f"Successfully approved payroll cycle {payroll_id} in background by User {approver_user_id}.")
-        return {"success": success}
+
+        # 2. Now generate PDFs for all payslips in this cycle sequentially & safely
+        payroll = Payroll.objects.get(id=payroll_id)
+        payslips = list(payroll.payslips.all())
+        total = len(payslips)
+        logger.info(f"Generating payslip PDFs for {total} payslips in payroll {payroll_id}...")
+
+        generated_count = 0
+        for idx, ps in enumerate(payslips, start=1):
+            try:
+                PayslipGenerationService.async_generate_payslip_pdf(ps)
+                generated_count += 1
+                logger.info(f"Generated payslip PDF ({idx}/{total}) for {ps.employee}")
+            except Exception as pe:
+                logger.error(f"Error generating payslip PDF for {ps.id}: {pe}")
+
+        logger.info(f"Completed payslip PDF generation for payroll {payroll_id}: {generated_count}/{total} generated.")
+        return {"success": success, "generated_count": generated_count, "total": total}
     except Exception as e:
         logger.error(f"Error executing task_approve_payroll_cycle: {e}")
         try:
@@ -275,3 +296,37 @@ Best Regards,
     except Exception as e:
         logger.error(f"Error executing task_email_payslip: {e}")
         raise e
+
+@shared_task
+def task_delete_payroll_cycle(payroll_id):
+    """
+    Celery task to permanently hard delete a payroll cycle and all associated records/payslips in background.
+    """
+    try:
+        from payroll.models import Payroll
+        payroll = Payroll.all_objects.filter(id=payroll_id).first()
+        if not payroll:
+            logger.warning(f"Payroll cycle {payroll_id} not found for background deletion.")
+            return {"success": False, "error": "Not found"}
+
+        # Delete all payslips and remove remote storage files
+        for ps in payroll.payslips.all():
+            if ps.pdf_file:
+                try:
+                    ps.pdf_file.delete(save=False)
+                except Exception as ex:
+                    logger.warning(f"Failed to delete pdf_file for payslip {ps.id}: {ex}")
+            ps.hard_delete()
+
+        # Delete all calculation records
+        for rec in payroll.records.all():
+            rec.hard_delete()
+
+        # Hard delete the payroll cycle itself
+        payroll.hard_delete()
+        logger.info(f"Successfully hard deleted payroll cycle {payroll_id} in background Celery worker.")
+        return {"success": True, "payroll_id": str(payroll_id)}
+    except Exception as e:
+        logger.error(f"Error executing task_delete_payroll_cycle for {payroll_id}: {e}")
+        raise e
+

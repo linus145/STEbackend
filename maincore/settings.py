@@ -338,6 +338,7 @@ REST_FRAMEWORK = {
         "code_execution": "15/min",
         "resume_parsing": "20/min",
         "ai_voice_screening": "5/min",
+        "log_violation": "60/min",
     },
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",

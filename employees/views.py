@@ -268,14 +268,15 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                 import random, string
                 password = 'B2lq_' + ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
 
-        # Ensure the employee has a linked user account
+        # Ensure the employee has an isolated linked user account for auth
         if not employee.user:
             from django.contrib.auth import get_user_model
             User = get_user_model()
-            user = User.objects.filter(email=employee.email).first()
+            internal_email = f"{employee.portal_username}@employee.b2linq.local"
+            user = User.objects.filter(email=internal_email).first()
             if not user:
                 user = User.objects.create_user(
-                    email=employee.email,
+                    email=internal_email,
                     password=password,
                     first_name=employee.first_name,
                     last_name=employee.last_name,
@@ -284,7 +285,7 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                 )
             else:
                 user.set_password(password)
-                user.is_verified = True  # Auto-verify existing accounts linked to employees
+                user.is_verified = True
                 user.save()
             employee.user = user
             employee.save()
@@ -523,4 +524,81 @@ class EmployeeLogoutView(APIView):
             status=status.HTTP_200_OK,
         )
         _delete_employee_auth_cookies(response)
+        return response
+
+
+class EmployeeRegisterView(APIView):
+    """
+    Allows an employee belonging to a company to register / activate their portal access.
+    Matches by email or portal_username, sets their chosen password, marks them ACTIVE,
+    and sets up their isolated employee portal session.
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginBurstThrottle, LoginSustainedThrottle]
+
+    def post(self, request, *args, **kwargs):
+        email_or_username = (request.data.get("email") or request.data.get("username") or "").strip()
+        password = (request.data.get("password") or "").strip()
+        employee_id = (request.data.get("employee_id") or "").strip()
+
+        if not email_or_username or not password:
+            return Response(
+                {"error": "Email or Portal Username and a new password are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(password) < 6:
+            return Response(
+                {"error": "Password must be at least 6 characters long."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from employees.models import Employee
+        from django.db.models import Q
+
+        query = Q(portal_username__iexact=email_or_username) | Q(email__iexact=email_or_username)
+        if employee_id:
+            query = query | Q(employee_id__iexact=employee_id)
+
+        employee = Employee.objects.filter(query, is_deleted=False).select_related('organization', 'startup', 'user').first()
+
+        if not employee:
+            return Response(
+                {"error": "No employee record found for the provided details. Please ask your company HR to add you first."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if employee.status in ['EXITED', 'INACTIVE']:
+            return Response(
+                {"error": "This employee account is inactive. Please contact your HR administrator."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Update portal password & activate if on-boarding
+        employee.portal_password = password
+        if employee.status == 'ON_BOARDING':
+            employee.status = 'ACTIVE'
+        employee.save(update_fields=['portal_password', 'status'])
+
+        # Authenticate and generate session
+        from employees.services import EmployeeService
+        user, tokens = EmployeeService.authenticate_employee(employee.portal_username, password)
+
+        response = Response(
+            {
+                "status": "success",
+                "message": "Employee portal account activated successfully. Welcome to your team portal!",
+                "data": {
+                    "portal_username": employee.portal_username,
+                    "employee_id": employee.employee_id,
+                    "email": employee.email,
+                    "first_name": employee.first_name,
+                    "last_name": employee.last_name,
+                    "role": employee.role,
+                    "user": UserSerializer(user).data,
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
+        _set_employee_auth_cookies(response, tokens["access"], tokens["refresh"])
         return response

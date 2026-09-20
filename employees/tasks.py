@@ -127,23 +127,8 @@ def task_bulk_import_employees(self, organization_id, startup_id, employees_data
                     designation_obj = Designation.objects.create(organization=organization, startup=startup, title=desig_name)
                     desig_cache[desig_key] = designation_obj
 
-            # User account lookup & password provisioning
+            # Employee portal temporary password
             temp_password = "B2lq_" + "".join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
-            user_account = user_cache.get(email)
-            if not user_account:
-                user_account = User.objects.create_user(
-                    email=email,
-                    password=temp_password,
-                    first_name=first_name,
-                    last_name=last_name,
-                    role="OPERATIONS",
-                    is_verified=True,
-                )
-                user_cache[email] = user_account
-            else:
-                user_account.set_password(temp_password)
-                user_account.is_verified = True
-                user_account.save()
 
             employee_id = str(row.get("employee_id") or "").strip()
             if not employee_id:
@@ -157,19 +142,17 @@ def task_bulk_import_employees(self, organization_id, startup_id, employees_data
                     organization=organization, email__iexact=manager_email, is_deleted=False
                 ).first()
 
-            # Check existing employee record
+            # Check existing employee record under organization
             emp = emp_cache.get(email)
             if not emp:
                 emp = Employee.all_objects.filter(organization=organization, email=email).first()
-            if not emp and user_account:
-                emp = Employee.all_objects.filter(user=user_account).first()
 
             if emp:
                 emp.is_deleted = False
                 emp.deleted_at = None
                 emp.startup = startup
                 emp.organization = organization
-                emp.user = user_account
+                # Preserve existing user if already linked, do not overwrite or create global user
                 emp.first_name = first_name
                 emp.last_name = last_name
                 emp.email = email
@@ -192,7 +175,7 @@ def task_bulk_import_employees(self, organization_id, startup_id, employees_data
                 emp = Employee.objects.create(
                     startup=startup,
                     organization=organization,
-                    user=user_account,
+                    user=None,
                     first_name=first_name,
                     last_name=last_name,
                     email=email,

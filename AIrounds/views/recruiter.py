@@ -1038,3 +1038,228 @@ class BulkEvaluateView(APIView, ResponseMixin):
             )
 
 
+class ManualScheduleInterviewView(APIView, ResponseMixin):
+    """
+    Directly schedules an AI interview session for a candidate without relying
+    on applicant ATS sync. Automatically registers candidate user/application,
+    orchestrates interview rounds, generates standalone exam credentials, and
+    delivers invitation email.
+    """
+
+    permission_classes = (IsAuthenticated, HasAIInterviewPermission)
+
+    def post(self, request):
+        from startups.models import CompanyProfile
+        from jobs.models import JobPost, JobApplication
+        from AIrounds.models import InterviewCandidate, CandidateInterviewLink
+        from useraccounts.models import CustomUser
+        from django.conf import settings
+        from django.utils import timezone
+        from datetime import timedelta
+
+        try:
+            company = CompanyProfile.objects.get(owner=request.user)
+        except CompanyProfile.DoesNotExist:
+            return self.build_response(
+                "error", "Company profile not found.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        candidate_name = (request.data.get("candidate_name") or "").strip()
+        candidate_email = (request.data.get("candidate_email") or "").strip().lower()
+        candidate_phone = (request.data.get("candidate_phone") or "").strip()
+        job_id = request.data.get("job_id")
+        custom_job_title = (request.data.get("custom_job_title") or "").strip()
+        rounds_input = request.data.get("rounds") or []
+        send_invite_email = request.data.get("send_invite_email", True)
+        notes = (request.data.get("notes") or "").strip()
+
+        if not candidate_name or not candidate_email:
+            return self.build_response(
+                "error",
+                "Both candidate name and candidate email are required.",
+                {},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not job_id and not custom_job_title:
+            return self.build_response(
+                "error",
+                "Please select an existing job role or provide a custom job title.",
+                {},
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 1. Resolve or create JobPost
+        try:
+            if job_id:
+                job = JobPost.objects.get(id=job_id, company=company, is_deleted=False)
+            else:
+                job = JobPost.objects.filter(
+                    company=company, title__iexact=custom_job_title, is_deleted=False
+                ).first()
+                if not job:
+                    job = JobPost.objects.create(
+                        company=company,
+                        title=custom_job_title,
+                        description=f"Interview assessment role for {custom_job_title}.",
+                        status="DRAFT",
+                        job_type="FULL_TIME",
+                    )
+        except JobPost.DoesNotExist:
+            return self.build_response(
+                "error", "Job post not found or unauthorized.", {}, status.HTTP_404_NOT_FOUND
+            )
+
+        # 2. Resolve or create candidate CustomUser
+        name_parts = candidate_name.split(" ", 1)
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        candidate_user = CustomUser.objects.filter(email=candidate_email).first()
+        if not candidate_user:
+            candidate_user = CustomUser.objects.create(
+                email=candidate_email,
+                first_name=first_name,
+                last_name=last_name,
+                phone_number=candidate_phone or None,
+                role=CustomUser.ROLE_OPERATIONS,
+                is_active=True,
+            )
+            candidate_user.set_unusable_password()
+            candidate_user.save()
+        else:
+            updated = False
+            if not candidate_user.first_name and first_name:
+                candidate_user.first_name = first_name
+                updated = True
+            if not candidate_user.last_name and last_name:
+                candidate_user.last_name = last_name
+                updated = True
+            if updated:
+                candidate_user.save(update_fields=["first_name", "last_name"])
+
+        # 3. Resolve or create JobApplication
+        application = JobApplication.objects.filter(
+            job=job, applicant=candidate_user, is_deleted=False
+        ).first()
+        if not application:
+            application = JobApplication.objects.create(
+                job=job,
+                applicant=candidate_user,
+                status="INTERVIEW",
+                cover_letter=notes or "Directly scheduled interview.",
+            )
+        else:
+            if application.status != "INTERVIEW":
+                application.status = "INTERVIEW"
+                application.save(update_fields=["status"])
+
+        # 4. Clean up any stale un-started sessions for this application
+        InterviewSession.objects.filter(
+            application=application, status__in=["PENDING", "CANCELLED", "FAILED"]
+        ).delete()
+
+        # 5. Build rounds config
+        rounds_config = []
+        if isinstance(rounds_input, list) and len(rounds_input) > 0:
+            for r in rounds_input:
+                timer_sec = r.get("timer_seconds")
+                if not timer_sec and r.get("timer_minutes"):
+                    timer_sec = int(r.get("timer_minutes")) * 60
+                elif not timer_sec and r.get("timer"):
+                    timer_sec = int(r.get("timer"))
+                else:
+                    timer_sec = timer_sec or 1800
+
+                rounds_config.append({
+                    "type": r.get("type", "TECHNICAL"),
+                    "title": r.get("title") or r.get("designation") or "TECHNICAL_SCREENING",
+                    "difficulty": r.get("difficulty", "MID"),
+                    "round_category": r.get("round_category", "NON_CODING"),
+                    "question_format": r.get("question_format", "TEXT"),
+                    "programming_language": r.get("programming_language", ""),
+                    "timer_seconds": timer_sec,
+                    "max_questions": int(r.get("max_questions", 5)),
+                    "settings": r.get("settings", {}),
+                    "questions": r.get("questions", []),
+                })
+        else:
+            rounds_config = [
+                {
+                    "type": "TECHNICAL",
+                    "title": "TECHNICAL_SCREENING",
+                    "difficulty": "MID",
+                    "round_category": "NON_CODING",
+                    "question_format": "TEXT",
+                    "programming_language": "",
+                    "timer_seconds": 1800,
+                    "max_questions": 5,
+                    "settings": {"focus": "Core Competencies & Problem Solving"},
+                    "questions": [],
+                }
+            ]
+
+        overall_config = {
+            "expires_in_days": 7,
+            "source": "MANUAL_PIPELINE_ENTRY",
+            "notes": notes,
+        }
+
+        # 6. Orchestrate session and rounds
+        try:
+            session, rounds = InterviewOrchestrator.create_interview_from_config(
+                str(application.id), overall_config, rounds_config
+            )
+
+            # 7. Create or update InterviewCandidate mapping
+            InterviewCandidate.objects.update_or_create(
+                application=application,
+                defaults={"session": session},
+            )
+
+            # 8. Create CandidateInterviewLink with standalone exam username/password
+            link, _ = CandidateInterviewLink.objects.get_or_create(
+                session=session,
+                defaults={"expires_at": timezone.now() + timedelta(days=7)},
+            )
+
+            # 9. Deliver email notification if requested
+            invite_sent = False
+            if send_invite_email:
+                try:
+                    invite_sent = InterviewNotifier.notify_candidate_of_invite(session)
+                except Exception:
+                    pass
+
+            frontend_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+            exam_url = f"{frontend_url}/interview/exam"
+
+            return self.build_response(
+                "success",
+                "Interview scheduled successfully.",
+                {
+                    "session_id": str(session.id),
+                    "application_id": str(application.id),
+                    "candidate_name": f"{candidate_user.first_name} {candidate_user.last_name}".strip(),
+                    "candidate_email": candidate_user.email,
+                    "job_title": job.title,
+                    "job_id": str(job.id),
+                    "exam_url": exam_url,
+                    "exam_token": str(link.token),
+                    "exam_credentials": {
+                        "username": link.exam_username,
+                        "password": link.exam_password,
+                    },
+                    "rounds_count": len(rounds),
+                    "status": session.status,
+                    "invite_sent": bool(invite_sent),
+                },
+                status_code=status.HTTP_201_CREATED,
+            )
+        except Exception as e:
+            return self.build_response(
+                "error", str(e), {}, status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+

@@ -25,10 +25,12 @@ from AIrounds.views import (
     TaskStatusView,
     ResendInviteView,
     BulkEvaluateView,
+    ManualScheduleInterviewView,
 )
 
 urlpatterns = [
     path('sessions/', RecruiterSessionListView.as_view(), name='session_list'),
+    path('schedule-manual/', ManualScheduleInterviewView.as_view(), name='schedule_manual'),
     path('start/', StartInterviewView.as_view(), name='start_interview'),
     path('configure/', ConfigureInterviewView.as_view(), name='configure_interview'),
     path('generate-questions/', GenerateQuestionPoolView.as_view(), name='generate_questions'),

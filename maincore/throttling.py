@@ -158,6 +158,12 @@ class OTPVerifyThrottle(LoggingSimpleRateThrottle):
 class LogViolationThrottle(LoggingSimpleRateThrottle):
     scope = 'log_violation'
 
+    def get_rate(self):
+        try:
+            return super().get_rate()
+        except Exception:
+            return '60/min'
+
     def get_cache_key(self, request, view):
         if request.user and request.user.is_authenticated:
             ident = request.user.pk
@@ -172,6 +178,12 @@ class LogViolationThrottle(LoggingSimpleRateThrottle):
 
 class CodeExecutionThrottle(LoggingSimpleRateThrottle):
     scope = 'code_execution'
+
+    def get_rate(self):
+        try:
+            return super().get_rate()
+        except Exception:
+            return '15/min'
 
     def get_cache_key(self, request, view):
         if request.user and request.user.is_authenticated:

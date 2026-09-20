@@ -145,11 +145,16 @@ class ChatService:
     @staticmethod
     def delete_message(message_id: str, user: User) -> bool:
         """
-        Soft deletes a message if the requester is the sender.
+        Soft deletes a message if the requester is the sender or a participant in the room.
         """
         try:
-            message = Message.objects.get(id=message_id, sender=user)
+            message = Message.objects.filter(
+                models.Q(id=message_id) & (models.Q(sender=user) | models.Q(room__participants=user))
+            ).first()
+            if not message:
+                return False
             message.delete()  # Inherits SoftDeleteModel's delete
             return True
-        except Message.DoesNotExist:
+        except Exception as e:
+            logger.error(f"Error deleting message {message_id}: {e}")
             return False

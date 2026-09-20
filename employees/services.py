@@ -8,20 +8,62 @@ class EmployeeService:
     @staticmethod
     def authenticate_employee(username_or_email, password):
         """
-        Pure logic for authenticating an employee.
-        Checks portal_username / email, verifies that the user is an active employee,
-        and returns the user & JWT tokens.
-
-        NOTE: Email verification (is_verified) is intentionally NOT checked here.
-        Employee accounts are provisioned directly by HR admins — they do not go
-        through the self-registration OTP flow that normal platform users follow.
+        Pure logic for authenticating an employee under their company.
+        Checks portal_username / email directly against Employee records,
+        verifies credentials against portal_password or linked user,
+        provisions an isolated auth principal if needed, and returns user & JWT tokens.
         """
-        user = UserService.authenticate_user(username_or_email, password)
-        if not user:
+        from employees.models import Employee
+        from django.contrib.auth import get_user_model
+        from django.db.models import Q
+        
+        # 1. Look up employee under company by portal_username OR email
+        employee = Employee.objects.filter(
+            Q(portal_username__iexact=username_or_email) | Q(email__iexact=username_or_email),
+            is_deleted=False
+        ).select_related('user', 'startup', 'organization').first()
+        
+        if not employee:
             raise AuthenticationFailed("Invalid employee credentials.")
-
-        if not hasattr(user, 'employee_profile'):
-            raise PermissionDenied("This account is not registered as an employee.")
+            
+        if employee.status in ['EXITED', 'INACTIVE']:
+            raise PermissionDenied("This employee account is inactive. Please contact your HR administrator.")
+            
+        # 2. Validate password against employee.portal_password OR linked user account
+        is_valid = False
+        if employee.portal_password and employee.portal_password == password:
+            is_valid = True
+        elif employee.user and employee.user.check_password(password):
+            is_valid = True
+            
+        if not is_valid:
+            raise AuthenticationFailed("Invalid employee credentials.")
+            
+        # 3. Ensure an isolated shadow auth user exists for SimpleJWT token generation
+        User = get_user_model()
+        user = employee.user
+        if not user:
+            internal_email = f"{employee.portal_username}@employee.b2linq.local"
+            user = User.objects.filter(email=internal_email).first()
+            if not user:
+                user = User.objects.create_user(
+                    email=internal_email,
+                    password=password,
+                    first_name=employee.first_name,
+                    last_name=employee.last_name,
+                    role='OPERATIONS',
+                    is_verified=True,
+                )
+            else:
+                user.set_password(password)
+                user.save()
+            employee.user = user
+            employee.save(update_fields=['user'])
+        else:
+            # Synchronize password on the linked auth user so token generation / checks remain consistent
+            if not user.check_password(password):
+                user.set_password(password)
+                user.save(update_fields=['password'])
 
         tokens = UserService.generate_tokens(user)
         return user, tokens

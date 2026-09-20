@@ -67,10 +67,21 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True, max_length=20)
     
     class Meta:
         model = User
         fields = ('email', 'password', 'first_name', 'last_name', 'phone_number', 'role')
+
+    def validate_phone_number(self, value):
+        if not value or not str(value).strip():
+            return None
+        val = str(value).strip()
+        if not re.match(r'^\+?[1-9]\d{6,14}$', val):
+            raise serializers.ValidationError("Enter a valid mobile phone number with country code (e.g. +919876543210).")
+        if User.objects.filter(phone_number=val).exists():
+            raise serializers.ValidationError("A user with this phone number already exists.")
+        return val
 
     def validate_password(self, value: str) -> str:
         if len(value) < 8:
@@ -114,7 +125,7 @@ class UpdatePhoneNumberSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=20, required=True)
 
     def validate_phone_number(self, value: str) -> str:
-        # Basic validation for digits and optional leading plus sign
-        if not re.match(r'^\+?1?\d{9,15}$', value):
+        val = value.strip()
+        if not re.match(r'^\+?[1-9]\d{6,14}$', val):
             raise serializers.ValidationError("Phone number must be entered in the format: '+999999999'. Up to 15 digits allowed.")
-        return value
+        return val

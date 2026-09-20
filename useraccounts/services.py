@@ -20,7 +20,7 @@ class UserService:
                 password=validated_data.get('password'),
                 first_name=validated_data.get('first_name', ''),
                 last_name=validated_data.get('last_name', ''),
-                phone_number=validated_data.get('phone_number', None),
+                phone_number=validated_data.get('phone_number') or None,
                 role=validated_data.get('role', User.ROLE_FOUNDER)
             )
             

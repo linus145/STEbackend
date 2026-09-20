@@ -47,6 +47,7 @@ from payroll.tasks import (
     task_reject_payroll_cycle,
     task_generate_payslip_pdf,
     task_email_payslip,
+    task_delete_payroll_cycle,
 )
 from startups.models import Startup
 from rest_framework.permissions import IsAuthenticated
@@ -557,16 +558,12 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
         payroll.status = 'DRAFT'
         payroll.save()
         
-        # Recalculate payroll immediately
-        try:
-            payroll, count = PayrollGenerationService.generate_monthly_payroll(startup, int(payroll.month), int(payroll.year))
-        except Exception as e:
-            task_generate_monthly_payroll.delay(str(startup.id), int(payroll.month), int(payroll.year))
+        # Dispatch recalculation to background Celery worker
+        task_generate_monthly_payroll.delay(str(startup.id), int(payroll.month), int(payroll.year))
         
-        payroll.refresh_from_db()
         return Response(
             {
-                "message": "Payroll recalculation completed successfully.",
+                "message": "Payroll recalculation dispatched to background workers successfully.",
                 "payroll": PayrollSerializer(payroll).data
             },
             status=status.HTTP_200_OK
@@ -588,19 +585,18 @@ class PayrollViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             "status": payroll.status,
             "total_count": target_total,
             "generated_count": generated_payslips,
-            "is_complete": payroll.status == 'APPROVED' and (generated_payslips >= target_total if target_total > 0 else True)
+            "is_complete": (payroll.status == 'APPROVED' and (generated_payslips >= target_total if target_total > 0 else True)) or payroll.status == 'FAILED'
         })
 
     def destroy(self, request, *args, **kwargs):
         """
-        Permanently hard-deletes the payroll run and all of its associated records.
+        Soft-deletes the payroll run immediately for responsive UI,
+        and dispatches permanent hard deletion to background Celery workers.
         """
         instance = self.get_object()
-        for rec in instance.records.all():
-            rec.hard_delete()
-        for ps in instance.payslips.all():
-            ps.hard_delete()
-        instance.hard_delete()
+        payroll_id = str(instance.id)
+        instance.delete()
+        task_delete_payroll_cycle.delay(payroll_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @decorators.action(detail=False, methods=["get"])

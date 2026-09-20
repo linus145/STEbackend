@@ -1,8 +1,12 @@
+import logging
 import datetime
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum, Q
+
+logger = logging.getLogger("payroll.services")
+
 from payroll.models import (
     Payroll, PayrollRecord, Payslip, SalaryStructure,
     Reimbursement, PayrollAdjustment, TaxConfiguration
@@ -323,10 +327,8 @@ class PayrollApprovalService:
             created_at__month=payroll.month
         ).update(approval_status='PAID')
 
-        payslip_ids = [str(ps.id) for ps in payslips]
-        PayslipGenerationService.batch_generate_payslips_parallel(payslip_ids)
-
         return True
+
 
     @classmethod
     @transaction.atomic
@@ -749,7 +751,7 @@ class PayslipGenerationService:
 
         except Exception as e:
             # ── Fallback: plain-text payslip ──────────────────────────────
-            print(f"ReportLab PDF generation failed ({e}), falling back to text.")
+            logger.warning(f"ReportLab PDF generation failed for payslip {payslip.id} ({e}), falling back to text.")
             try:
                 designation_text = str(payslip.employee.designation) if payslip.employee.designation else 'N/A'
                 department_text  = str(payslip.employee.department) if payslip.employee.department else 'N/A'
@@ -808,7 +810,7 @@ This is a system-generated payslip. No signature required.
                 )
                 payslip.save()
             except Exception as ex:
-                print(f"Error generating fallback payslip file: {ex}")
+                logger.error(f"Error generating fallback payslip file for {payslip.id}: {ex}")
 
     @classmethod
     def generate_single_payslip_by_id(cls, payslip_id):

@@ -210,7 +210,19 @@ class CompanyCheckView(APIView, ResponseMixin):
 
     def get(self, request):
         has_company = hasattr(request.user, "company_profile")
-        data = {"has_company": has_company}
+        has_sub = False
+        try:
+            if hasattr(request.user, "subscription") and request.user.subscription:
+                sub = request.user.subscription
+                has_sub = (sub.status == "active" and sub.plan is not None and float(sub.plan.price) > 0)
+        except Exception:
+            has_sub = False
+
+        data = {
+            "has_company": has_company,
+            "has_active_subscription": has_sub,
+            "has_hr_access": bool(has_company and has_sub),
+        }
         if has_company:
             data["company"] = CompanyProfileSerializer(request.user.company_profile).data
         return self.build_response("success", "Check complete.", data)

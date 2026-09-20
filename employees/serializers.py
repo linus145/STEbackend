@@ -131,43 +131,35 @@ class EmployeeSerializer(serializers.ModelSerializer):
             portal_username = unique_uname
             validated_data['portal_username'] = portal_username
 
-        # 2. Automatically generate a placeholder password for the User account
-        #    (The actual password will be set later via the send-credentials endpoint)
-        import random
-        import string
-        chars = string.ascii_letters + string.digits
-        auto_password = 'B2lq_' + ''.join(random.choice(chars) for _ in range(8))
-            
-        # 3. Securely register the User account for authorization
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
+        # 2. Store or generate a portal_password on the Employee record
+        portal_password = validated_data.get('portal_password')
+        if not portal_password:
+            import random
+            import string
+            chars = string.ascii_letters + string.digits
+            portal_password = 'B2lq_' + ''.join(random.choice(chars) for _ in range(8))
+        validated_data['portal_password'] = portal_password
+
+        # 3. Tenant-scoped employee validation:
+        # Check if an active employee with this email already exists under this company
         email = validated_data.get('email')
-        user = User.objects.filter(email=email).first()
-        if not user:
-            user = User.objects.create_user(
-                email=email,
-                password=auto_password,
-                first_name=validated_data.get('first_name', ''),
-                last_name=validated_data.get('last_name', ''),
-                role='OPERATIONS'
-            )
-        else:
-            # Clear link on any soft-deleted employees to prevent IntegrityError
-            Employee.all_objects.filter(user=user, is_deleted=True).update(user=None)
-            
-            # Check if linked to an active employee
-            if Employee.objects.filter(user=user).exists():
-                raise serializers.ValidationError({
-                    "email": "This email is already registered and linked to an active employee profile."
-                })
-                
-            # Update user's name and role to employee operations defaults
-            user.first_name = validated_data.get('first_name', '')
-            user.last_name = validated_data.get('last_name', '')
-            user.role = 'OPERATIONS'
-            user.set_password(auto_password)
-            user.save()
-        validated_data['user'] = user
+        organization = validated_data.get('organization')
+        startup = validated_data.get('startup')
+        existing_emp_qs = Employee.objects.filter(email__iexact=email, is_deleted=False)
+        if organization:
+            existing_emp_qs = existing_emp_qs.filter(organization=organization)
+        elif startup:
+            existing_emp_qs = existing_emp_qs.filter(startup=startup)
+        if existing_emp_qs.exists():
+            raise serializers.ValidationError({
+                "email": "An active employee with this email already exists in this organization."
+            })
+
+        # Standard Multi-Tenant Practice:
+        # Employees belong strictly under the company without directly creating or hijacking
+        # global platform CustomUser records. This keeps normal user registration completely
+        # independent and prevents email collision or password overwrites.
+        validated_data['user'] = None
         
         instance = super().create(validated_data)
         
@@ -228,33 +220,29 @@ class EmployeeSerializer(serializers.ModelSerializer):
             instance.portal_password = password
             instance.save()
             
-            # Set hashed password on the Django User account
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            if not instance.user:
-                email = validated_data.get('email', instance.email)
-                user = User.objects.filter(email=email).first()
+            # Synchronize password with linked user or provision isolated shadow auth user
+            if instance.user:
+                instance.user.set_password(password)
+                instance.user.save()
+            else:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                internal_email = f"{instance.portal_username}@employee.b2linq.local"
+                user = User.objects.filter(email=internal_email).first()
                 if not user:
                     user = User.objects.create_user(
-                        email=email,
+                        email=internal_email,
                         password=password,
                         first_name=validated_data.get('first_name', instance.first_name),
                         last_name=validated_data.get('last_name', instance.last_name),
-                        role='OPERATIONS'
+                        role='OPERATIONS',
+                        is_verified=True
                     )
                 else:
-                    Employee.all_objects.filter(user=user, is_deleted=True).update(user=None)
-                    if Employee.objects.filter(user=user).exclude(id=instance.id).exists():
-                        raise serializers.ValidationError({
-                            "email": "This email is already registered and linked to an active employee profile."
-                        })
                     user.set_password(password)
                     user.save()
                 instance.user = user
-                instance.save()
-            else:
-                instance.user.set_password(password)
-                instance.user.save()
+                instance.save(update_fields=['user'])
             
             # Send credentials email with the actual password
             try:
