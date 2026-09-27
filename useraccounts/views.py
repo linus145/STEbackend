@@ -179,6 +179,17 @@ class ProfileView(APIView, RequestResponseMixin):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, *args, **kwargs):
+        # EmployeeUser has its own dedicated serializer — using UserSerializer
+        # on an EmployeeUser crashes because it lacks user_skills, secondary_email, etc.
+        if request.user.__class__.__name__ == 'EmployeeUser':
+            from employees.serializers import EmployeeUserSerializer
+            serializer = EmployeeUserSerializer(request.user)
+            return self.build_response(
+                "success",
+                "Profile fetched successfully.",
+                serializer.data,
+                status.HTTP_200_OK,
+            )
         serializer = UserSerializer(request.user)
         return self.build_response(
             "success",

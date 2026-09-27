@@ -346,3 +346,184 @@ def create_employee_statutory_details(sender, instance, created, **kwargs):
             employee=instance,
             defaults={'organization': instance.organization}
         )
+
+
+class EmployeeUser(SoftDeleteModel):
+    """
+    Dedicated authentication user model for the Employee Portal.
+    Completely isolates employee portal users from the customer/founder CustomUser table.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    employee = models.OneToOneField(
+        'Employee',
+        on_delete=models.CASCADE,
+        related_name='portal_user'
+    )
+    portal_username = models.CharField(max_length=150, unique=True, db_index=True)
+    email = models.EmailField(db_index=True)
+    password = models.CharField(max_length=255)
+    role = models.CharField(max_length=20, choices=Employee.ROLE_CHOICES, default='EMPLOYEE', db_index=True)
+    is_active = models.BooleanField(default=True)
+    last_login = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    USERNAME_FIELD = 'portal_username'
+    REQUIRED_FIELDS = ['email']
+
+    class Meta:
+        verbose_name = "Employee User"
+        verbose_name_plural = "Employee Users"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        emp_name = f"{self.employee.first_name} {self.employee.last_name}" if hasattr(self, 'employee') and self.employee else ""
+        return f"{self.portal_username} ({emp_name})".strip()
+
+    def check_password(self, raw_password):
+        from django.contrib.auth.hashers import check_password
+        return check_password(raw_password, self.password)
+
+    def set_password(self, raw_password):
+        from django.contrib.auth.hashers import make_password
+        self.password = make_password(raw_password)
+
+    def get_username(self):
+        return self.portal_username
+
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
+    @property
+    def is_staff(self):
+        return False
+
+    @property
+    def is_superuser(self):
+        return False
+
+    @property
+    def employee_profile(self):
+        """Duck-typing compatibility for modules referencing request.user.employee_profile"""
+        try:
+            return self.employee
+        except Exception:
+            return None
+
+    @property
+    def organization(self):
+        try:
+            return self.employee.organization
+        except Exception:
+            return None
+
+    @property
+    def startup(self):
+        try:
+            return self.employee.startup
+        except Exception:
+            return None
+
+    @property
+    def first_name(self):
+        try:
+            return self.employee.first_name
+        except Exception:
+            return ''
+
+    @property
+    def last_name(self):
+        try:
+            return self.employee.last_name
+        except Exception:
+            return ''
+
+    @property
+    def phone(self):
+        try:
+            return self.employee.phone
+        except Exception:
+            return ''
+
+    @property
+    def phone_number(self):
+        try:
+            return self.employee.phone
+        except Exception:
+            return ''
+
+    @property
+    def groups(self):
+        from django.contrib.auth.models import Group
+        return Group.objects.none()
+
+    @property
+    def user_permissions(self):
+        from django.contrib.auth.models import Permission
+        return Permission.objects.none()
+
+    def has_perm(self, perm, obj=None):
+        return False
+
+    def has_perms(self, perm_list, obj=None):
+        return False
+
+    def has_module_perms(self, app_label):
+        return False
+
+
+@receiver(post_save, sender=Employee)
+def sync_employee_portal_user(sender, instance, created, **kwargs):
+    """
+    Automatically creates or synchronizes the dedicated EmployeeUser whenever
+    an Employee record is saved, ensuring complete isolation from CustomUser.
+    """
+    if not instance.portal_username:
+        return
+    try:
+        emp_user = EmployeeUser.objects.filter(employee=instance).first()
+        if not emp_user:
+            emp_user = EmployeeUser(
+                employee=instance,
+                portal_username=instance.portal_username,
+                email=instance.email,
+                role=instance.role,
+                is_active=(instance.status not in ['EXITED', 'INACTIVE']),
+            )
+            if instance.portal_password:
+                emp_user.set_password(instance.portal_password)
+            else:
+                emp_user.password = ''
+            emp_user.save()
+        else:
+            changed = False
+            if emp_user.portal_username != instance.portal_username:
+                emp_user.portal_username = instance.portal_username
+                changed = True
+            if emp_user.email != instance.email:
+                emp_user.email = instance.email
+                changed = True
+            if emp_user.role != instance.role:
+                emp_user.role = instance.role
+                changed = True
+            expected_active = (instance.status not in ['EXITED', 'INACTIVE'])
+            if emp_user.is_active != expected_active:
+                emp_user.is_active = expected_active
+                changed = True
+            if instance.portal_password and not emp_user.password:
+                emp_user.set_password(instance.portal_password)
+                changed = True
+            elif instance.portal_password and not emp_user.check_password(instance.portal_password):
+                # portal_password was changed on Employee record — re-sync the hash
+                emp_user.set_password(instance.portal_password)
+                changed = True
+            if changed:
+                emp_user.save()
+    except Exception:
+        pass
+

@@ -162,6 +162,21 @@ class EmployeeSerializer(serializers.ModelSerializer):
         validated_data['user'] = None
         
         instance = super().create(validated_data)
+
+        # Provision dedicated EmployeeUser without touching CustomUser
+        from employees.models import EmployeeUser
+        emp_user, _ = EmployeeUser.objects.get_or_create(
+            employee=instance,
+            defaults={
+                'portal_username': instance.portal_username,
+                'email': instance.email,
+                'role': instance.role,
+                'is_active': (instance.status not in ['EXITED', 'INACTIVE']),
+            }
+        )
+        if instance.portal_password:
+            emp_user.set_password(instance.portal_password)
+            emp_user.save()
         
         # NOTE: No credentials email is sent during creation.
         # The HR admin should go to the employee details page, set the password,
@@ -218,31 +233,25 @@ class EmployeeSerializer(serializers.ModelSerializer):
         if password:
             # Store plaintext password for HR admin visibility
             instance.portal_password = password
-            instance.save()
+            instance.save(update_fields=['portal_password'])
             
-            # Synchronize password with linked user or provision isolated shadow auth user
-            if instance.user:
-                instance.user.set_password(password)
-                instance.user.save()
-            else:
-                from django.contrib.auth import get_user_model
-                User = get_user_model()
-                internal_email = f"{instance.portal_username}@employee.b2linq.local"
-                user = User.objects.filter(email=internal_email).first()
-                if not user:
-                    user = User.objects.create_user(
-                        email=internal_email,
-                        password=password,
-                        first_name=validated_data.get('first_name', instance.first_name),
-                        last_name=validated_data.get('last_name', instance.last_name),
-                        role='OPERATIONS',
-                        is_verified=True
-                    )
-                else:
-                    user.set_password(password)
-                    user.save()
-                instance.user = user
-                instance.save(update_fields=['user'])
+            # Synchronize password with isolated EmployeeUser
+            from employees.models import EmployeeUser
+            emp_user, _ = EmployeeUser.objects.get_or_create(
+                employee=instance,
+                defaults={
+                    'portal_username': instance.portal_username,
+                    'email': instance.email,
+                    'role': instance.role,
+                    'is_active': (instance.status not in ['EXITED', 'INACTIVE']),
+                }
+            )
+            emp_user.portal_username = instance.portal_username
+            emp_user.email = instance.email
+            emp_user.role = instance.role
+            emp_user.is_active = (instance.status not in ['EXITED', 'INACTIVE'])
+            emp_user.set_password(password)
+            emp_user.save()
             
             # Send credentials email with the actual password
             try:
@@ -301,6 +310,27 @@ class EmployeeSerializer(serializers.ModelSerializer):
             for k, v in bank_data.items():
                 setattr(detail, k, v)
             detail.save()
+
+        # Keep EmployeeUser synchronized with any changed attributes
+        from employees.models import EmployeeUser
+        emp_user = EmployeeUser.objects.filter(employee=instance).first()
+        if emp_user:
+            emp_user_updated = False
+            if emp_user.portal_username != instance.portal_username:
+                emp_user.portal_username = instance.portal_username
+                emp_user_updated = True
+            if emp_user.email != instance.email:
+                emp_user.email = instance.email
+                emp_user_updated = True
+            if emp_user.role != instance.role:
+                emp_user.role = instance.role
+                emp_user_updated = True
+            new_is_active = (instance.status not in ['EXITED', 'INACTIVE'])
+            if emp_user.is_active != new_is_active:
+                emp_user.is_active = new_is_active
+                emp_user_updated = True
+            if emp_user_updated:
+                emp_user.save()
                 
         return instance
 
@@ -310,3 +340,26 @@ class EmployeeDetailSerializer(EmployeeSerializer):
     
     class Meta(EmployeeSerializer.Meta):
         fields = EmployeeSerializer.Meta.fields + ['emergency_contacts', 'documents']
+
+
+class EmployeeUserSerializer(serializers.ModelSerializer):
+    profile = serializers.SerializerMethodField()
+    first_name = serializers.CharField(source='employee.first_name', read_only=True)
+    last_name = serializers.CharField(source='employee.last_name', read_only=True)
+    phone_number = serializers.CharField(source='employee.phone', read_only=True)
+    is_verified = serializers.BooleanField(default=True, read_only=True)
+
+    class Meta:
+        from employees.models import EmployeeUser
+        model = EmployeeUser
+        fields = (
+            'id', 'portal_username', 'email', 'first_name', 'last_name',
+            'phone_number', 'role', 'is_active', 'is_verified', 'profile',
+            'created_at', 'updated_at'
+        )
+
+    def get_profile(self, obj):
+        if hasattr(obj, 'employee') and obj.employee:
+            return EmployeeSerializer(obj.employee).data
+        return None
+

@@ -240,11 +240,15 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     def me(self, request):
         """Return the employee profile linked to the currently authenticated user."""
         user = request.user
-        try:
-            employee = Employee.objects.select_related(
-                "department", "designation", "user", "profile_details"
-            ).get(user=user)
-        except Employee.DoesNotExist:
+        employee = getattr(user, 'employee_profile', None)
+        if not employee:
+            try:
+                employee = Employee.objects.select_related(
+                    "department", "designation", "user", "profile_details"
+                ).get(user=user)
+            except Exception:
+                employee = Employee.objects.filter(email=getattr(user, 'email', None)).first()
+        if not employee:
             return Response(
                 {"error": "No employee profile found for this user."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -256,6 +260,7 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     def send_credentials(self, request, pk=None):
         employee = self.get_object()
         from employees.services import EmployeeService
+        from employees.models import EmployeeUser
 
         password = request.data.get("password")
 
@@ -268,38 +273,6 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                 import random, string
                 password = 'B2lq_' + ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
 
-        # Ensure the employee has an isolated linked user account for auth
-        if not employee.user:
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            internal_email = f"{employee.portal_username}@employee.b2linq.local"
-            user = User.objects.filter(email=internal_email).first()
-            if not user:
-                user = User.objects.create_user(
-                    email=internal_email,
-                    password=password,
-                    first_name=employee.first_name,
-                    last_name=employee.last_name,
-                    role='OPERATIONS',
-                    is_verified=True  # Employee accounts are HR-provisioned, no OTP verification needed
-                )
-            else:
-                user.set_password(password)
-                user.is_verified = True
-                user.save()
-            employee.user = user
-            employee.save()
-        else:
-            employee.user.set_password(password)
-            # Ensure any existing linked user is marked verified
-            if not employee.user.is_verified:
-                employee.user.is_verified = True
-            employee.user.save()
-
-        # Store plaintext password for HR admin visibility
-        employee.portal_password = password
-        employee.save()
-
         # Update portal_username if provided
         portal_username = request.data.get("portal_username")
         if portal_username:
@@ -308,7 +281,38 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
                 from employees.models import Employee as EmpModel
                 if not EmpModel.all_objects.filter(portal_username=new_username).exclude(id=employee.id).exists():
                     employee.portal_username = new_username
-                    employee.save()
+
+        # Store plaintext password for HR admin visibility
+        employee.portal_password = password
+        employee.save(update_fields=['portal_password', 'portal_username'])
+
+        # Provision/update dedicated EmployeeUser without touching CustomUser
+        emp_user, _ = EmployeeUser.objects.get_or_create(
+            employee=employee,
+            defaults={
+                'portal_username': employee.portal_username,
+                'email': employee.email,
+                'role': employee.role,
+                'is_active': (employee.status not in ['EXITED', 'INACTIVE']),
+            }
+        )
+        emp_user.portal_username = employee.portal_username
+        emp_user.email = employee.email
+        emp_user.role = employee.role
+        emp_user.is_active = (employee.status not in ['EXITED', 'INACTIVE'])
+        emp_user.set_password(password)
+        emp_user.save()
+
+        # If employee was linked to a legacy shadow CustomUser, safely unlink and remove it
+        if employee.user:
+            legacy_u = employee.user
+            if legacy_u.email.endswith('@employee.b2linq.local') or legacy_u.email.startswith('emp_'):
+                try:
+                    employee.user = None
+                    employee.save(update_fields=['user'])
+                    legacy_u.delete()
+                except Exception:
+                    pass
 
         result = EmployeeService.send_credentials_email(
             employee, request.META.get("HTTP_HOST"), request.build_absolute_uri,
@@ -327,9 +331,8 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     )
     def change_credentials(self, request):
         user = request.user
-        try:
-            employee = user.employee_profile
-        except Employee.DoesNotExist:
+        employee = getattr(user, 'employee_profile', None)
+        if not employee:
             return Response(
                 {"error": "Employee profile not found for this user."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -366,9 +369,8 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
     )
     def change_password(self, request):
         user = request.user
-        try:
-            employee = user.employee_profile
-        except Employee.DoesNotExist:
+        employee = getattr(user, 'employee_profile', None)
+        if not employee:
             return Response(
                 {"error": "Employee profile not found for this user."},
                 status=status.HTTP_404_NOT_FOUND,
@@ -382,13 +384,21 @@ class EmployeeViewSet(StartupTenantMixin, viewsets.ModelViewSet):
             )
 
         try:
-            # Change on active Django auth User model
-            user.set_password(password)
-            user.save()
+            # Change on active authenticated user model
+            if hasattr(user, 'set_password'):
+                user.set_password(password)
+                user.save()
 
             # Synchronize with Employee record for HR tool effectiveness
             employee.portal_password = password
-            employee.save()
+            employee.save(update_fields=['portal_password'])
+
+            # Synchronize with dedicated EmployeeUser
+            from employees.models import EmployeeUser
+            emp_user = EmployeeUser.objects.filter(employee=employee).first()
+            if emp_user and emp_user != user:
+                emp_user.set_password(password)
+                emp_user.save()
 
             return Response(
                 {"message": "Password updated successfully and synchronized with HR records."},
@@ -494,11 +504,15 @@ class EmployeeLoginView(APIView):
                         status=status.HTTP_403_FORBIDDEN
                     )
 
+            from employees.models import EmployeeUser
+            from employees.serializers import EmployeeUserSerializer
+            user_data = EmployeeUserSerializer(user).data if isinstance(user, EmployeeUser) else UserSerializer(user).data
+
             response = Response(
                 {
                     "status": "success",
                     "message": "Employee login successful.",
-                    "data": {"user": UserSerializer(user).data},
+                    "data": {"user": user_data},
                 },
                 status=status.HTTP_200_OK,
             )
@@ -506,6 +520,7 @@ class EmployeeLoginView(APIView):
             _set_employee_auth_cookies(response, tokens["access"], tokens["refresh"])
             return response
         except Exception as e:
+            print(f"[EmployeeLogin] FAILED for '{username_or_email}' role={expected_role}: {type(e).__name__}: {e}")
             error_data = getattr(e, "detail", None)
             if isinstance(error_data, dict):
                 return Response(error_data, status=status.HTTP_403_FORBIDDEN)
@@ -553,7 +568,7 @@ class EmployeeRegisterView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from employees.models import Employee
+        from employees.models import Employee, EmployeeUser
         from django.db.models import Q
 
         query = Q(portal_username__iexact=email_or_username) | Q(email__iexact=email_or_username)
@@ -584,6 +599,9 @@ class EmployeeRegisterView(APIView):
         from employees.services import EmployeeService
         user, tokens = EmployeeService.authenticate_employee(employee.portal_username, password)
 
+        from employees.serializers import EmployeeUserSerializer
+        user_data = EmployeeUserSerializer(user).data if isinstance(user, EmployeeUser) else UserSerializer(user).data
+
         response = Response(
             {
                 "status": "success",
@@ -595,7 +613,7 @@ class EmployeeRegisterView(APIView):
                     "first_name": employee.first_name,
                     "last_name": employee.last_name,
                     "role": employee.role,
-                    "user": UserSerializer(user).data,
+                    "user": user_data,
                 },
             },
             status=status.HTTP_201_CREATED,

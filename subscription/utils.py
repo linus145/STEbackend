@@ -10,14 +10,21 @@ def check_subscription_feature(user, feature_name):
         return False
 
     owner = user
-    if not hasattr(user, 'company_profile'):
+    if not hasattr(user, 'company_profile') or user.__class__.__name__ == 'EmployeeUser':
         # Check if they are an employee
         employee = getattr(user, "employee_profile", None)
         if not employee:
             from employees.models import Employee
-            employee = Employee.objects.filter(email=user.email).first()
-        if employee and employee.organization and employee.organization.company:
-            owner = employee.organization.company.owner
+            employee = Employee.objects.filter(email=getattr(user, 'email', '')).first()
+        if employee:
+            if employee.organization and employee.organization.company and employee.organization.company.owner:
+                owner = employee.organization.company.owner
+            elif employee.startup and employee.startup.founder:
+                owner = employee.startup.founder
+
+    if owner.__class__.__name__ == 'EmployeeUser':
+        # If no CustomUser owner was found, grant basic HR access to the employee
+        return True if feature_name == "has_hr_toolkit" else False
 
     try:
         from subscription.models import UserSubscription

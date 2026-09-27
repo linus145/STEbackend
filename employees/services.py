@@ -9,19 +9,19 @@ class EmployeeService:
     def authenticate_employee(username_or_email, password):
         """
         Pure logic for authenticating an employee under their company.
-        Checks portal_username / email directly against Employee records,
-        verifies credentials against portal_password or linked user,
-        provisions an isolated auth principal if needed, and returns user & JWT tokens.
+        Checks portal_username / email directly against Employee records and EmployeeUser,
+        verifies credentials, and returns isolated EmployeeUser & JWT tokens.
         """
-        from employees.models import Employee
-        from django.contrib.auth import get_user_model
+        from employees.models import Employee, EmployeeUser
         from django.db.models import Q
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from django.utils import timezone
         
         # 1. Look up employee under company by portal_username OR email
         employee = Employee.objects.filter(
             Q(portal_username__iexact=username_or_email) | Q(email__iexact=username_or_email),
             is_deleted=False
-        ).select_related('user', 'startup', 'organization').first()
+        ).select_related('startup', 'organization').first()
         
         if not employee:
             raise AuthenticationFailed("Invalid employee credentials.")
@@ -29,44 +29,86 @@ class EmployeeService:
         if employee.status in ['EXITED', 'INACTIVE']:
             raise PermissionDenied("This employee account is inactive. Please contact your HR administrator.")
             
-        # 2. Validate password against employee.portal_password OR linked user account
+        # 2. Get or create dedicated EmployeeUser
+        emp_user = EmployeeUser.objects.filter(employee=employee).first()
+        if not emp_user:
+            emp_user = EmployeeUser.objects.create(
+                employee=employee,
+                portal_username=employee.portal_username,
+                email=employee.email,
+                role=employee.role,
+                is_active=(employee.status not in ['EXITED', 'INACTIVE']),
+            )
+            if employee.portal_password:
+                emp_user.set_password(employee.portal_password)
+                emp_user.save()
+
+        # 3. Validate password against EmployeeUser, employee.portal_password, or linked legacy user account
         is_valid = False
-        if employee.portal_password and employee.portal_password == password:
+        if emp_user.check_password(password):
             is_valid = True
+        elif employee.portal_password and employee.portal_password == password:
+            is_valid = True
+            emp_user.set_password(password)
+            emp_user.save()
         elif employee.user and employee.user.check_password(password):
             is_valid = True
+            emp_user.set_password(password)
+            emp_user.save()
             
         if not is_valid:
             raise AuthenticationFailed("Invalid employee credentials.")
-            
-        # 3. Ensure an isolated shadow auth user exists for SimpleJWT token generation
-        User = get_user_model()
-        user = employee.user
-        if not user:
-            internal_email = f"{employee.portal_username}@employee.b2linq.local"
-            user = User.objects.filter(email=internal_email).first()
-            if not user:
-                user = User.objects.create_user(
-                    email=internal_email,
-                    password=password,
-                    first_name=employee.first_name,
-                    last_name=employee.last_name,
-                    role='OPERATIONS',
-                    is_verified=True,
-                )
-            else:
-                user.set_password(password)
-                user.save()
-            employee.user = user
-            employee.save(update_fields=['user'])
-        else:
-            # Synchronize password on the linked auth user so token generation / checks remain consistent
-            if not user.check_password(password):
-                user.set_password(password)
-                user.save(update_fields=['password'])
 
-        tokens = UserService.generate_tokens(user)
-        return user, tokens
+        # If employee was linked to a legacy shadow CustomUser, clean it up
+        if employee.user and (employee.user.email.endswith('@employee.b2linq.local') or employee.user.email.startswith('emp_')):
+            try:
+                legacy_u = employee.user
+                employee.user = None
+                employee.save(update_fields=['user'])
+                legacy_u.delete()
+            except Exception:
+                pass
+
+        # Ensure latest synchronized attributes
+        if emp_user.portal_username != employee.portal_username:
+            emp_user.portal_username = employee.portal_username
+        if emp_user.email != employee.email:
+            emp_user.email = employee.email
+        emp_user.role = employee.role
+        emp_user.is_active = (employee.status not in ['EXITED', 'INACTIVE'])
+        emp_user.last_login = timezone.now()
+        emp_user.save()
+
+        # 4. Generate SimpleJWT tokens directly for EmployeeUser without forcing CustomUser FK
+        from rest_framework_simplejwt.settings import api_settings
+        from rest_framework_simplejwt.utils import datetime_from_epoch
+        refresh = RefreshToken()
+        refresh[api_settings.USER_ID_CLAIM] = str(emp_user.id)
+        refresh['user_type'] = 'employee'
+        refresh['role'] = emp_user.role
+        refresh['email'] = emp_user.email
+
+        # If token_blacklist is active, register in OutstandingToken with user=None to prevent FK violation
+        if "rest_framework_simplejwt.token_blacklist" in settings.INSTALLED_APPS:
+            from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+            try:
+                jti = refresh[api_settings.JTI_CLAIM]
+                exp = refresh["exp"]
+                OutstandingToken.objects.create(
+                    user=None,
+                    jti=jti,
+                    token=str(refresh),
+                    created_at=refresh.current_time,
+                    expires_at=datetime_from_epoch(exp),
+                )
+            except Exception:
+                pass
+
+        tokens = {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }
+        return emp_user, tokens
 
     @staticmethod
     def send_credentials_email(employee, host_meta=None, absolute_uri_fn=None, temp_password=None):
@@ -111,10 +153,10 @@ HR Operations Team
         html_message = render_to_string("emails/credentials_invite.html", context)
         
         email_sent = False
+        from_email_addr = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.com')
+        from_email_formatted = f"{org_name} <{from_email_addr}>"
         try:
             from useraccounts.tasks import send_email_async
-            from_email_addr = getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@b2linq.com')
-            from_email_formatted = f"{org_name} <{from_email_addr}>"
             send_email_async.delay(
                 subject=subject,
                 message=message,
@@ -124,7 +166,19 @@ HR Operations Team
             )
             email_sent = True
         except Exception as e:
-            print(f"Failed to queue Celery email task: {e}")
+            try:
+                from django.core.mail import send_mail
+                send_mail(
+                    subject,
+                    message,
+                    from_email_formatted,
+                    [employee.email],
+                    fail_silently=False,
+                    html_message=html_message,
+                )
+                email_sent = True
+            except Exception as direct_err:
+                print(f"Direct send_mail also failed: {direct_err}")
             
         return {
             "email": employee.email,
@@ -138,18 +192,45 @@ HR Operations Team
         """
         Pure logic for changing employee credentials (username and/or password).
         """
+        from employees.models import Employee, EmployeeUser
+        from rest_framework.exceptions import ValidationError
+
         if portal_username:
             new_username = portal_username.strip().lower()
             if not new_username:
                 raise ValidationError("Username cannot be empty.")
-            # Validate uniqueness
+            # Validate uniqueness across both Employee and EmployeeUser
             if Employee.all_objects.filter(portal_username=new_username).exclude(id=employee.id).exists():
                 raise ValidationError("Username already taken by another employee. Please choose a different username.")
+            if EmployeeUser.objects.filter(portal_username=new_username).exclude(employee=employee).exists():
+                raise ValidationError("Username already taken by another employee. Please choose a different username.")
             employee.portal_username = new_username
-            employee.save()
+            employee.save(update_fields=['portal_username'])
             
         if password:
-            user.set_password(password)
-            user.save()
+            employee.portal_password = password
+            employee.save(update_fields=['portal_password'])
+
+        # Update dedicated EmployeeUser
+        emp_user = EmployeeUser.objects.filter(employee=employee).first()
+        if not emp_user:
+            emp_user = EmployeeUser.objects.create(
+                employee=employee,
+                portal_username=employee.portal_username,
+                email=employee.email,
+                role=employee.role,
+                is_active=(employee.status not in ['EXITED', 'INACTIVE']),
+            )
+        if portal_username:
+            emp_user.portal_username = employee.portal_username
+        if password:
+            emp_user.set_password(password)
+        emp_user.save()
+
+        # If user passed is a legacy CustomUser, synchronize it too
+        if user and user != emp_user and hasattr(user, 'set_password'):
+            if password:
+                user.set_password(password)
+                user.save()
             
         return employee.portal_username

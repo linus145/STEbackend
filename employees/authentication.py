@@ -1,7 +1,7 @@
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.settings import api_settings
 from rest_framework.exceptions import AuthenticationFailed
 from django.conf import settings
-from employees.models import Employee
 
 class EmployeeCookieJWTAuthentication(JWTAuthentication):
     """
@@ -9,6 +9,17 @@ class EmployeeCookieJWTAuthentication(JWTAuthentication):
     Strictly reads the access token from the employee-isolated cookie 'employee_access_token'.
     Ensures that the authenticated user possesses an active employee profile.
     """
+
+    def get_user(self, validated_token):
+        user_id = validated_token.get(api_settings.USER_ID_CLAIM)
+        from employees.models import EmployeeUser
+        try:
+            emp_user = EmployeeUser.objects.select_related('employee').get(id=user_id)
+            if not emp_user.is_active:
+                raise AuthenticationFailed("Employee user account is inactive.", code="user_inactive")
+            return emp_user
+        except EmployeeUser.DoesNotExist:
+            return super().get_user(validated_token)
 
     def authenticate(self, request):
         # Strictly read from the employee-specific cookie
@@ -31,9 +42,8 @@ class EmployeeCookieJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed(str(e))
         
         # Enforce that the user possesses a linked Employee profile
-        try:
-            employee = user.employee_profile
-        except (AttributeError, Employee.DoesNotExist):
+        employee = getattr(user, 'employee_profile', None)
+        if not employee:
             raise AuthenticationFailed("This account is not registered as an employee.")
 
         return user, validated_token

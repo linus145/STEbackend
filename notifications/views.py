@@ -11,6 +11,8 @@ class NotificationListView(generics.ListAPIView):
     dashboard_filter = None
 
     def get_queryset(self):
+        if not hasattr(self.request.user, 'notifications'):
+            return Notification.objects.none()
         queryset = Notification.objects.filter(recipient=self.request.user)
         if self.dashboard_filter:
             queryset = queryset.filter(dashboard=self.dashboard_filter)
@@ -24,6 +26,8 @@ class MarkNotificationReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
+        if not hasattr(request.user, 'notifications'):
+            return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
         try:
             notification = Notification.objects.get(pk=pk, recipient=request.user)
             notification.is_read = True
@@ -36,6 +40,8 @@ class MarkAllReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        if not hasattr(request.user, 'notifications'):
+            return Response({'status': 'all marked read'}, status=status.HTTP_200_OK)
         dashboard = request.query_params.get('dashboard') or request.data.get('dashboard')
         qs = Notification.objects.filter(recipient=request.user, is_read=False)
         if dashboard:
@@ -47,6 +53,8 @@ class DeleteAllNotificationsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request):
+        if not hasattr(request.user, 'notifications'):
+            return Response(status=status.HTTP_204_NO_CONTENT)
         dashboard = request.query_params.get('dashboard')
         qs = Notification.objects.filter(recipient=request.user)
         if dashboard:
@@ -58,6 +66,15 @@ class NotificationUnreadCountsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if not hasattr(request.user, 'notifications'):
+            return Response({
+                'USER': 0,
+                'RECRUITER': 0,
+                'INTERVIEW': 0,
+                'HR': 0,
+                'total': 0
+            }, status=status.HTTP_200_OK)
+
         user_unread = Notification.objects.filter(recipient=request.user, dashboard='USER', is_read=False).count()
         recruiter_unread = Notification.objects.filter(recipient=request.user, dashboard='RECRUITER', is_read=False).count()
         interview_unread = Notification.objects.filter(recipient=request.user, dashboard='INTERVIEW', is_read=False).count()

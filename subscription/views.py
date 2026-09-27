@@ -188,6 +188,11 @@ class UserSubscriptionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        # EmployeeUser doesn't have subscriptions (FK expects CustomUser) —
+        # return empty data gracefully instead of crashing with ValueError.
+        if request.user.__class__.__name__ == 'EmployeeUser':
+            return Response({"plan_details": None, "status": "active", "is_payment_verified": True})
+
         subscription, created = UserSubscription.objects.get_or_create(
             user=request.user,
             defaults={
